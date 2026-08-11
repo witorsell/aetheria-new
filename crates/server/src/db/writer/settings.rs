@@ -4,14 +4,14 @@ impl Writer {
     pub async fn touch_settings(&self) -> sqlx::Result<()> {
         self.dispatch(|conn| Box::pin(async move {
             let now = chrono_now_millis();
-            let result = sqlx::query("UPDATE settings SET updated_at = ? WHERE user_id = 1")
+            let result = sqlx::query("UPDATE settings SET updated_at = ? WHERE user_id = (SELECT MAX(id) FROM users)")
                 .bind(now)
                 .execute(&mut *conn)
                 .await
                 .map(|_| ());
             if result.is_err() {
                 let _ = sqlx::query(
-                    "INSERT OR IGNORE INTO settings (user_id, api_base_url, api_key, model_name, system_prompt, context_limit, post_history_instructions, forbid_external_media, updated_at) VALUES (1, '', '', '', '', 8192, '', 0, ?)",
+                    "INSERT OR IGNORE INTO settings (user_id, api_base_url, api_key, model_name, system_prompt, context_limit, post_history_instructions, forbid_external_media, updated_at) VALUES ((SELECT MAX(id) FROM users), '', '', '', '', 8192, '', 0, ?)",
                 )
                 .bind(now)
                 .execute(&mut *conn)

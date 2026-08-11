@@ -330,7 +330,8 @@ pub async fn export_character(
                     let local_path = u.split('?').next().unwrap_or(u).trim_start_matches('/');
                     loaded_img = image::open(local_path).ok();
                 } else if u.starts_with("http") {
-                    if let Ok(resp) = reqwest::get(u).await {
+                    // reuse the same SSRF protections as the image proxy
+                    if let Ok(resp) = crate::routes::proxy::proxy_fetch_with_checks(u).await {
                         if let Ok(bytes) = resp.bytes().await {
                             loaded_img = image::load_from_memory(&bytes).ok();
                         }

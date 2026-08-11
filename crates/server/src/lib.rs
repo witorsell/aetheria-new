@@ -51,4 +51,6 @@ pub async fn bootstrap_user(db: &db::Db, username: &str, password: &str) {
         .upsert_user(username.to_string(), hash)
         .await
         .expect("bootstrapping the initial user should not fail");
+    // init settings for the new user
+    db.writer.touch_settings().await.ok();
 }

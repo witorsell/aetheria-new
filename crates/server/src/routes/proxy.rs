@@ -39,6 +39,69 @@ fn is_private_ip(ip: IpAddr) -> bool {
     false
 }
 
+pub async fn proxy_fetch_with_checks(url: &str) -> Result<reqwest::Response, StatusCode> {
+    let parsed_url = match Url::parse(url) {
+        Ok(url) => url,
+        Err(_) => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    if parsed_url.scheme() != "http" && parsed_url.scheme() != "https" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let Some(host_str) = parsed_url.host_str() else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+
+    let mut pinned_addr: Option<SocketAddr> = None;
+
+    if let Ok(ip) = host_str.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    } else {
+        if host_str == "localhost" {
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        let port = parsed_url.port_or_known_default().unwrap_or(80);
+        let Ok(resolved) = (host_str, port).to_socket_addrs() else {
+            return Err(StatusCode::BAD_REQUEST);
+        };
+
+        let mut first_addr = None;
+        let mut any_resolved = false;
+        for socket_addr in resolved {
+            any_resolved = true;
+            if is_private_ip(socket_addr.ip()) {
+                return Err(StatusCode::FORBIDDEN);
+            }
+            first_addr.get_or_insert(socket_addr);
+        }
+        if !any_resolved {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        pinned_addr = first_addr;
+    }
+
+    let mut client_builder = Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none());
+    if let Some(addr) = pinned_addr {
+        client_builder = client_builder.resolve(host_str, addr);
+    }
+    let client = client_builder.build().unwrap_or_default();
+    client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(url, error = %e, "proxy fetch failed");
+            StatusCode::BAD_GATEWAY
+        })
+}
+
 pub async fn proxy_image(Extension(_user_id): Extension<i64>, 
     State(state): State<AppState>,
     Query(query): Query<ProxyQuery>,
