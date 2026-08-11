@@ -52,7 +52,17 @@ async fn main() {
 
     let app = server::routes::build_router(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:4310").await.unwrap();
-    tracing::info!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
+    let bind_addr = std::env::var("AETHERIA_BIND").unwrap_or_else(|_| "127.0.0.1:4310".to_string());
+    let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("failed to bind to {bind_addr}: {e}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!("listening on {}", listener.local_addr().map(|a| a.to_string()).unwrap_or(bind_addr));
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!("server error: {e}");
+        std::process::exit(1);
+    }
 }

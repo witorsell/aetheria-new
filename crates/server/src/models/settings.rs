@@ -133,6 +133,10 @@ pub struct SettingsView {
 
 impl SettingsView {
     pub fn sampling_params(&self) -> crate::provider::SamplingParams {
+        let reasoning_effort = self
+            .reasoning_effort
+            .parse::<crate::provider::ReasoningEffort>()
+            .unwrap_or_default();
         crate::provider::SamplingParams {
             temperature: self.temperature,
             top_p: self.top_p,
@@ -140,7 +144,7 @@ impl SettingsView {
             frequency_penalty: self.frequency_penalty,
             presence_penalty: self.presence_penalty,
             max_tokens: self.max_response_tokens,
-            reasoning_effort: self.reasoning_effort.clone(),
+            reasoning_effort,
         }
     }
 }

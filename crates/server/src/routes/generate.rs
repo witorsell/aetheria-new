@@ -54,35 +54,36 @@ struct PreparedGeneration {
     context_limit: i64,
 }
 
-async fn assemble_generation(
-    state: &AppState,
+async fn fetch_user_persona(
+    pool: &sqlx::SqlitePool,
     user_id: i64,
-    chat: &crate::models::chat::Chat,
-    character: &crate::models::character::Character,
-    history: &[crate::models::message::MessageNode],
-    new_user_message: &str,
-    respond_as_user: bool,
-    continuation: bool,
-    speaker_names: Option<&HashMap<String, String>>,
-    group_nudge: Option<&str>,
-) -> Result<PreparedGeneration, crate::error::ApiError> {
-    let settings = crate::models::settings::get_view(&state.db.read_pool, user_id).await?;
-    let api_key =
-        crate::models::settings::get_decrypted_api_key(&state.db.read_pool, user_id, &state.encryption_key).await?;
-
-    let user = crate::models::user::find_by_id(&state.db.read_pool, user_id).await?;
+) -> Result<(String, Option<String>), crate::error::ApiError> {
+    let user = crate::models::user::find_by_id(pool, user_id).await?;
     let user_name = user
         .as_ref()
         .and_then(|u| u.display_name.clone())
         .unwrap_or_else(|| user.as_ref().map(|u| u.username.clone()).unwrap_or_default());
     let user_persona = user.as_ref().and_then(|u| {
         if u.use_persona {
-            u.persona.as_deref()
+            u.persona.clone()
         } else {
             None
         }
     });
+    Ok((user_name, user_persona))
+}
 
+async fn resolve_lorebook_context(
+    state: &AppState,
+    user_id: i64,
+    chat: &crate::models::chat::Chat,
+    character: &crate::models::character::Character,
+    history: &[crate::models::message::MessageNode],
+    new_user_message: &str,
+    user_name: &str,
+    context_limit: i64,
+    speaker_names: Option<&HashMap<String, String>>,
+) -> Result<(String, String), crate::error::ApiError> {
     let mut all_lorebooks = Vec::new();
     let is_customized = sqlx::query_scalar::<_, bool>("SELECT lorebooks_customized FROM chats WHERE id = ?")
         .bind(&chat.id)
@@ -110,16 +111,18 @@ async fn assemble_generation(
         crate::provider::prompt::scan_and_inject_lorebooks(&all_lorebooks, history, new_user_message);
     let lorebook_after = crate::provider::prompt::prepend_memory_summary(&lorebook_after, chat.memory_summary.as_deref());
     let vector_context = crate::vector_memory::retrieve_relevant_context(
-        state, user_id, &chat.id, history, new_user_message, &character.name, &user_name, settings.context_limit, speaker_names,
+        state, user_id, &chat.id, history, new_user_message, &character.name, user_name, context_limit, speaker_names,
     )
     .await;
     let lorebook_after = crate::provider::prompt::prepend_vector_context(&lorebook_after, &vector_context);
-    let regex_scripts = crate::models::regex_script::list_prompt_only(&state.db.read_pool, user_id).await.unwrap_or_default();
-    let active_preset = match &settings.active_preset_id {
-        Some(id) => crate::models::preset::get(&state.db.read_pool, user_id, id).await.ok().flatten(),
-        None => None,
-    };
 
+    Ok((lorebook_before, lorebook_after))
+}
+
+fn resolve_character_prompts(
+    character: &crate::models::character::Character,
+    settings: &crate::models::settings::SettingsView,
+) -> (String, String) {
     let sys_prompt = if !character.system_prompt.trim().is_empty() {
         character.system_prompt.clone()
     } else {
@@ -130,6 +133,39 @@ async fn assemble_generation(
     } else {
         settings.post_history_instructions.clone()
     };
+    (sys_prompt, post_hist)
+}
+
+async fn assemble_generation(
+    state: &AppState,
+    user_id: i64,
+    chat: &crate::models::chat::Chat,
+    character: &crate::models::character::Character,
+    history: &[crate::models::message::MessageNode],
+    new_user_message: &str,
+    respond_as_user: bool,
+    continuation: bool,
+    speaker_names: Option<&HashMap<String, String>>,
+    group_nudge: Option<&str>,
+) -> Result<PreparedGeneration, crate::error::ApiError> {
+    let settings = crate::models::settings::get_view(&state.db.read_pool, user_id).await?;
+    let api_key =
+        crate::models::settings::get_decrypted_api_key(&state.db.read_pool, user_id, &state.encryption_key).await?;
+
+    let (user_name, user_persona) = fetch_user_persona(&state.db.read_pool, user_id).await?;
+
+    let (lorebook_before, lorebook_after) = resolve_lorebook_context(
+        state, user_id, chat, character, history, new_user_message, &user_name, settings.context_limit, speaker_names,
+    )
+    .await?;
+
+    let regex_scripts = crate::models::regex_script::list_prompt_only(&state.db.read_pool, user_id).await.unwrap_or_default();
+    let active_preset = match &settings.active_preset_id {
+        Some(id) => crate::models::preset::get(&state.db.read_pool, user_id, id).await.ok().flatten(),
+        None => None,
+    };
+
+    let (sys_prompt, post_hist) = resolve_character_prompts(character, &settings);
 
     let messages = build_messages(PromptContext {
         character,
@@ -139,7 +175,7 @@ async fn assemble_generation(
         post_history_instructions: &post_hist,
         context_limit: settings.context_limit.max(0) as usize,
         user_name: &user_name,
-        user_persona,
+        user_persona: user_persona.as_deref(),
         lorebook_before: &lorebook_before,
         lorebook_after: &lorebook_after,
         regex_scripts: &regex_scripts,
@@ -178,6 +214,7 @@ pub async fn generate(Extension(user_id): Extension<i64>,
     Path(chat_id): Path<String>,
     axum::Json(input): axum::Json<GenerateInput>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
+    state.check_generation_rate_limit(user_id).await?;
     if input.content.trim().is_empty() {
         return Err(crate::error::ApiError::bad_request("Message content cannot be empty"));
     }
@@ -203,6 +240,7 @@ pub async fn regenerate(Extension(user_id): Extension<i64>,
     Path(chat_id): Path<String>,
     Query(params): Query<RegenerateParams>,
 ) -> Result<Sse<EventStream>, crate::error::ApiError> {
+    state.check_generation_rate_limit(user_id).await?;
     let chat = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
         .await?
         .ok_or_else(|| crate::error::ApiError::from(StatusCode::NOT_FOUND))?;
@@ -259,6 +297,7 @@ pub async fn continue_generation(Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
+    state.check_generation_rate_limit(user_id).await?;
     let chat = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
         .await?
         .ok_or_else(|| crate::error::ApiError::from(StatusCode::NOT_FOUND))?;
@@ -590,6 +629,7 @@ pub async fn respond_as_user(
     Path(chat_id): Path<String>,
     Query(params): Query<RespondAsUserParams>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
+    state.check_generation_rate_limit(user_id).await?;
     let chat = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
         .await?
         .ok_or_else(|| crate::error::ApiError::from(StatusCode::NOT_FOUND))?;
@@ -679,6 +719,7 @@ pub async fn generate_character_field(Extension(user_id): Extension<i64>,
     Path(character_id): Path<String>,
     axum::Json(input): axum::Json<GenerateFieldInput>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
+    state.check_generation_rate_limit(user_id).await?;
     let character = crate::models::character::get(&state.db.read_pool, user_id, &character_id)
         .await?
         .ok_or_else(|| crate::error::ApiError::from(StatusCode::NOT_FOUND))?;

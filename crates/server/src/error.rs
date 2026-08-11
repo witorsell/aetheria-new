@@ -39,6 +39,10 @@ impl ApiError {
         Self::new(422, message)
     }
 
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        Self::new(429, message)
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(500, message)
     }

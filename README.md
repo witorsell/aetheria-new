@@ -152,6 +152,13 @@ Optional (on a fresh install, at least one onboarding method is needed, either b
 |---|---|---|
 | `INITIAL_USERNAME` / `INITIAL_PASSWORD` | `admin` / `password` | Bootstrap an initial user on first startup |
 | `ENABLE_REGISTRATION` | `false` | Set to `true` to allow self-registration at `/register` |
+| `AETHERIA_BIND` | `127.0.0.1:4310` | IP and port to bind server listener |
+| `AETHERIA_DOMAIN` | `yourdomain.com` | Domain name used in Nginx proxy configuration |
+| `MAX_UPLOAD_SIZE_MB` | `25` | Max body/upload size limit in megabytes |
+| `AETHERIA_GENERATE_BURST` | `20.0` | Max burst capacity for generation rate limit per user |
+| `AETHERIA_GENERATE_PER_SEC` | `0.5` | Token refill rate per second for generation rate limiter (e.g. 30/min) |
+| `AETHERIA_IMAGE_CACHE_MAX_CAPACITY` | `500` | Max item capacity for cached proxy images in moka cache |
+| `AETHERIA_IMAGE_CACHE_TTL_SECS` | `3600` | Time-to-live in seconds for cached proxy images |
 
 ## Getting started
 
@@ -218,4 +225,11 @@ sqlite3 crates/server/aetheria.sqlite3 "UPDATE _sqlx_migrations SET checksum = X
 Collision on the same number instead? Renumber yours, leave the one already applied alone. And since `migrations/` gets embedded at compile time, a bare `cargo build` right after editing it sometimes no-ops in under a second. Touch `crates/server/src/db/mod.rs` first if a build finishes suspiciously fast.
 
 ### Nginx
-Example config in `deploy/nginx-aetheria.conf`, points the domain at `127.0.0.1:4310`.
+
+Auto-generate `deploy/nginx-aetheria.conf` directly from your `.env` variables (`AETHERIA_BIND`, `MAX_UPLOAD_SIZE_MB`, `AETHERIA_DOMAIN`):
+
+```bash
+./deploy/generate-nginx-config.sh
+```
+
+This keeps your Nginx proxy target, upload limits, and domain name in sync with your `.env` configuration without requiring separate manual edits.

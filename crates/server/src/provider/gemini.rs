@@ -150,7 +150,9 @@ impl ModelProvider for GeminiProvider {
                 frequency_penalty: sampling.frequency_penalty,
                 presence_penalty: sampling.presence_penalty,
                 max_output_tokens: if sampling.max_tokens > 0 { sampling.max_tokens as i32 } else { 8192 },
-                thinking_config: crate::provider::reasoning_effort_to_budget_tokens(&sampling.reasoning_effort)
+                thinking_config: sampling
+                    .reasoning_effort
+                    .to_budget_tokens()
                     .map(|thinking_budget| GeminiThinkingConfig { thinking_budget }),
             },
         };

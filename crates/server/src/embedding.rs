@@ -39,6 +39,7 @@ impl From<EmbedMode> for crate::local_embedding::EmbedMode {
 /// backend (nomic-embed-text embeds queries and stored documents
 /// asymmetrically); the API path ignores it.
 pub async fn embed(
+    client: &reqwest::Client,
     backend: &crate::models::settings::EmbeddingBackend,
     inputs: &[String],
     mode: EmbedMode,
@@ -51,7 +52,7 @@ pub async fn embed(
             Err("Local embeddings feature ('local-embeddings') is not enabled in this server build.".to_string())
         }
         crate::models::settings::EmbeddingBackend::Api { api_base_url, api_key, model_name } => {
-            embed_api(api_base_url, api_key, model_name, inputs).await
+            embed_api(client, api_base_url, api_key, model_name, inputs).await
         }
     }
 }
@@ -59,12 +60,17 @@ pub async fn embed(
 /// calls an openai-compatible /embeddings endpoint for a batch in one
 /// request. re-sorts by the response's own index field, don't trust
 /// request order to survive every provider
-pub async fn embed_api(api_base_url: &str, api_key: &str, model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>, String> {
+pub async fn embed_api(
+    client: &reqwest::Client,
+    api_base_url: &str,
+    api_key: &str,
+    model: &str,
+    inputs: &[String],
+) -> Result<Vec<Vec<f32>>, String> {
     if inputs.is_empty() {
         return Ok(Vec::new());
     }
 
-    let client = reqwest::Client::new();
     let response = client
         .post(format!("{}/embeddings", api_base_url.trim_end_matches('/')))
         .bearer_auth(api_key)

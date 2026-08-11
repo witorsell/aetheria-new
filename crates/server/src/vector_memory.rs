@@ -65,7 +65,7 @@ pub async fn maybe_index_chat(state: &AppState, user_id: i64, chat_id: &str) {
 
     for batch in pending.chunks(INDEX_BATCH_SIZE) {
         let texts: Vec<String> = batch.iter().map(|m| thinking_stripped(&m.role, &m.content)).collect();
-        let vectors = match embedding::embed(&cfg, &texts, crate::embedding::EmbedMode::Document).await {
+        let vectors = match embedding::embed(&state.http_client, &cfg, &texts, crate::embedding::EmbedMode::Document).await {
             Ok(v) => v,
             Err(_) => return,
         };
@@ -125,7 +125,7 @@ pub async fn retrieve_relevant_context(
         return String::new();
     }
 
-    let query_vector = match embedding::embed(&cfg, &[query_text], crate::embedding::EmbedMode::Query).await {
+    let query_vector = match embedding::embed(&state.http_client, &cfg, &[query_text], crate::embedding::EmbedMode::Query).await {
         Ok(mut v) if !v.is_empty() => v.remove(0),
         _ => return String::new(),
     };

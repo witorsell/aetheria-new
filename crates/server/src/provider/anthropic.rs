@@ -92,7 +92,7 @@ impl ModelProvider for AnthropicProvider {
 
         // extended thinking won't take temperature/top_p/top_k in the same
         // request, and max_tokens has to leave room past the thinking budget
-        let budget_tokens = crate::provider::reasoning_effort_to_budget_tokens(&sampling.reasoning_effort);
+        let budget_tokens = sampling.reasoning_effort.to_budget_tokens();
         let base_max_tokens = if sampling.max_tokens > 0 { sampling.max_tokens as u32 } else { 8192 };
         let (max_tokens, temperature, top_p, top_k, thinking) = match budget_tokens {
             Some(budget) => (

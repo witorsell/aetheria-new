@@ -12,7 +12,8 @@ pub async fn run(mut conn: SqliteConnection, mut rx: mpsc::Receiver<WriteCommand
         let fut = AssertUnwindSafe(job(&mut conn));
         let pinned = AssertUnwindSafe(std::pin::pin!(fut));
         if futures_util::FutureExt::catch_unwind(pinned).await.is_err() {
-            tracing::error!("writer job panicked, continuing with next command");
+            tracing::error!("writer job panicked, aborting process to prevent database corruption");
+            std::process::exit(1);
         }
     }
 }

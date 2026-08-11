@@ -28,6 +28,61 @@ impl std::fmt::Display for ProviderError {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    #[default]
+    #[serde(rename = "", alias = "off", alias = "none")]
+    Off,
+    Low,
+    Medium,
+    High,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReasoningEffort::Off => "",
+            ReasoningEffort::Low => "low",
+            ReasoningEffort::Medium => "medium",
+            ReasoningEffort::High => "high",
+        }
+    }
+
+    pub fn to_budget_tokens(&self) -> Option<i64> {
+        match self {
+            ReasoningEffort::Low => Some(4096),
+            ReasoningEffort::Medium => Some(10000),
+            ReasoningEffort::High => Some(24000),
+            ReasoningEffort::Off => None,
+        }
+    }
+
+    pub fn is_off(&self) -> bool {
+        *self == ReasoningEffort::Off
+    }
+}
+
+impl std::fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for ReasoningEffort {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "" | "off" | "none" => Ok(ReasoningEffort::Off),
+            "low" => Ok(ReasoningEffort::Low),
+            "medium" => Ok(ReasoningEffort::Medium),
+            "high" => Ok(ReasoningEffort::High),
+            other => Err(format!("invalid reasoning_effort: {other}")),
+        }
+    }
+}
+
 // 0 on top_k/frequency_penalty/presence_penalty/max_tokens = disabled,
 // dropped from the request (some providers reject explicit top_k: 0)
 #[derive(Clone)]
@@ -38,9 +93,9 @@ pub struct SamplingParams {
     pub frequency_penalty: f64,
     pub presence_penalty: f64,
     pub max_tokens: i64,
-    // NanoGPT/OpenRouter reasoning_effort: low/medium/high, "" to omit.
-    // only OpenAIProvider wires this up
-    pub reasoning_effort: String,
+    // nanogpt/openrouter reasoning_effort: low/medium/high, off to omit.
+    // openai, anthropic, and gemini map this appropriately
+    pub reasoning_effort: ReasoningEffort,
 }
 
 impl Default for SamplingParams {
@@ -52,7 +107,7 @@ impl Default for SamplingParams {
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
             max_tokens: 0,
-            reasoning_effort: String::new(),
+            reasoning_effort: ReasoningEffort::Off,
         }
     }
 }
@@ -63,25 +118,20 @@ fn is_zero_i64(v: &i64) -> bool {
 fn is_zero_f64(v: &f64) -> bool {
     *v == 0.0
 }
-fn is_empty_str(v: &str) -> bool {
-    v.is_empty()
+fn is_off_reasoning(v: &ReasoningEffort) -> bool {
+    v.is_off()
 }
 
 // anthropic/gemini want a raw token count, not the low/medium/high label.
 // None if unset/unrecognized = thinking off
-pub fn reasoning_effort_to_budget_tokens(effort: &str) -> Option<i64> {
-    match effort {
-        "low" => Some(4096),
-        "medium" => Some(10000),
-        "high" => Some(24000),
-        _ => None,
-    }
+pub fn reasoning_effort_to_budget_tokens(effort: &ReasoningEffort) -> Option<i64> {
+    effort.to_budget_tokens()
 }
 
 #[derive(Serialize)]
-struct CompletionRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
+struct CompletionRequest<'a> {
+    model: &'a str,
+    messages: &'a [ChatMessage],
     stream: bool,
     temperature: f64,
     top_p: f64,
@@ -93,8 +143,8 @@ struct CompletionRequest {
     presence_penalty: f64,
     #[serde(skip_serializing_if = "is_zero_i64")]
     max_tokens: i64,
-    #[serde(skip_serializing_if = "is_empty_str")]
-    reasoning_effort: String,
+    #[serde(skip_serializing_if = "is_off_reasoning")]
+    reasoning_effort: ReasoningEffort,
 }
 
 #[derive(Deserialize)]
@@ -190,7 +240,9 @@ impl ModelProvider for OpenAIProvider {
             .post(format!("{base_url}/chat/completions"))
             .bearer_auth(api_key)
             .json(&CompletionRequest {
-                model, messages, stream: true,
+                model: &model,
+                messages: &messages,
+                stream: true,
                 temperature: sampling.temperature,
                 top_p: sampling.top_p,
                 top_k: sampling.top_k,

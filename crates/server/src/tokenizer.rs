@@ -39,8 +39,36 @@ fn tokenizer() -> &'static Tokenizer {
     })
 }
 
+fn estimate_fallback_tokens(text: &str) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    let mut tokens = 0.0;
+    let mut word_len = 0;
+
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() {
+            word_len += 1;
+        } else {
+            if word_len > 0 {
+                tokens += (word_len as f64 / 5.0).ceil();
+                word_len = 0;
+            }
+            if c.is_ascii_punctuation() {
+                tokens += 1.0;
+            } else if !c.is_ascii_whitespace() {
+                tokens += 1.5;
+            }
+        }
+    }
+    if word_len > 0 {
+        tokens += (word_len as f64 / 5.0).ceil();
+    }
+    (tokens.round() as usize).max(1)
+}
+
 /// real BPE token count instead of the old chars/4 guess when local-embeddings
-/// is enabled; falls back to char ratio when disabled or on parse error.
+/// is enabled; falls back to an enhanced multi-script token estimator when disabled.
 pub fn count_tokens(text: &str) -> usize {
     if text.is_empty() {
         return 0;
@@ -51,7 +79,7 @@ pub fn count_tokens(text: &str) -> usize {
             return encoding.len();
         }
     }
-    (text.chars().count() as f64 / 4.0).ceil() as usize
+    estimate_fallback_tokens(text)
 }
 
 #[cfg(test)]

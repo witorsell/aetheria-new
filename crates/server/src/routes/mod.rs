@@ -130,6 +130,12 @@ pub fn build_router(state: AppState) -> Router {
         .merge(protected)
         .nest("/api/v1", protected_v1)
         .layer(DefaultBodyLimit::max(get_max_upload_bytes()))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' ws: wss:; font-src 'self' data:;",
+            ),
+        ))
         .fallback_service(
             ServeDir::new(base_path().join("crates/frontend/dist")).fallback(
                 ServiceBuilder::new()

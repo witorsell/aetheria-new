@@ -25,6 +25,39 @@ fn absolute_max_age() -> Duration {
     Duration::from_secs(secs)
 }
 
+#[derive(Debug)]
+pub struct TokenBucket {
+    tokens: f64,
+    max_tokens: f64,
+    refill_rate_per_sec: f64,
+    last_update: std::time::Instant,
+}
+
+impl TokenBucket {
+    pub fn new(max_tokens: f64, refill_rate_per_sec: f64) -> Self {
+        Self {
+            tokens: max_tokens,
+            max_tokens,
+            refill_rate_per_sec,
+            last_update: std::time::Instant::now(),
+        }
+    }
+
+    pub fn try_consume(&mut self, tokens: f64) -> bool {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_update).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * self.refill_rate_per_sec).min(self.max_tokens);
+        self.last_update = now;
+
+        if self.tokens >= tokens {
+            self.tokens -= tokens;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: std::sync::Arc<Db>,
@@ -41,6 +74,8 @@ pub struct AppState {
     /// brute-force stays locked as long as attempts keep coming in, and
     /// clears itself 15 minutes after they stop.
     pub login_attempts: Cache<String, u32>,
+    /// rate limiter token buckets for text generation endpoints per user
+    pub generation_rate_limiter: Cache<i64, std::sync::Arc<tokio::sync::Mutex<TokenBucket>>>,
     pub registration_enabled: bool,
     /// idle timeout and absolute max age for sessions
     pub session_idle_timeout: Duration,
@@ -69,6 +104,15 @@ impl AppState {
             .build()
             .expect("building reqwest client should not fail");
 
+        let img_cache_cap = std::env::var("AETHERIA_IMAGE_CACHE_MAX_CAPACITY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(500);
+        let img_cache_ttl = std::env::var("AETHERIA_IMAGE_CACHE_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3600);
+
         Self {
             db: std::sync::Arc::new(db),
             cookie_key: Key::derive_from(secret.as_bytes()),
@@ -77,17 +121,46 @@ impl AppState {
                 .try_into()
                 .expect("AETHERIA_ENCRYPTION_KEY must be exactly 32 bytes"),
             image_cache: Cache::builder()
-                .max_capacity(500)
-                .time_to_live(Duration::from_secs(3600))
+                .max_capacity(img_cache_cap)
+                .time_to_live(Duration::from_secs(img_cache_ttl))
                 .build(),
             http_client,
             login_attempts: Cache::builder()
                 .max_capacity(10_000)
                 .time_to_live(Duration::from_secs(15 * 60))
                 .build(),
+            generation_rate_limiter: Cache::builder()
+                .max_capacity(10_000)
+                .time_to_idle(Duration::from_secs(3600))
+                .build(),
             registration_enabled,
             session_idle_timeout,
             session_absolute_max_age,
+        }
+    }
+
+    pub async fn check_generation_rate_limit(&self, user_id: i64) -> Result<(), crate::error::ApiError> {
+        let bucket_arc = match self.generation_rate_limiter.get(&user_id).await {
+            Some(b) => b,
+            None => {
+                let max_tokens = std::env::var("AETHERIA_GENERATE_BURST")
+                    .ok()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(20.0);
+                let refill_per_sec = std::env::var("AETHERIA_GENERATE_PER_SEC")
+                    .ok()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(0.5);
+                let b = std::sync::Arc::new(tokio::sync::Mutex::new(TokenBucket::new(max_tokens, refill_per_sec)));
+                self.generation_rate_limiter.insert(user_id, b.clone()).await;
+                b
+            }
+        };
+        let mut bucket = bucket_arc.lock().await;
+        if bucket.try_consume(1.0) {
+            Ok(())
+        } else {
+            Err(crate::error::ApiError::too_many_requests("Rate limit exceeded for generation endpoint"))
         }
     }
 }
@@ -95,5 +168,18 @@ impl AppState {
 impl FromRef<AppState> for Key {
     fn from_ref(state: &AppState) -> Self {
         state.cookie_key.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_bucket_consumes_and_limits() {
+        let mut bucket = TokenBucket::new(2.0, 0.0);
+        assert!(bucket.try_consume(1.0));
+        assert!(bucket.try_consume(1.0));
+        assert!(!bucket.try_consume(1.0));
     }
 }
