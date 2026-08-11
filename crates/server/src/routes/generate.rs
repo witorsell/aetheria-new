@@ -21,10 +21,10 @@ pub async fn generate(Extension(user_id): Extension<i64>,
     Path(chat_id): Path<String>,
     axum::Json(input): axum::Json<GenerateInput>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
-    state.check_generation_rate_limit(user_id).await?;
     if input.content.trim().is_empty() {
         return Err(crate::error::ApiError::bad_request("Message content cannot be empty"));
     }
+    state.check_generation_rate_limit(user_id).await?;
     let parent_id = input.parent_id.clone();
     let message = state
         .db
