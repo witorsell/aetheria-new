@@ -6,6 +6,7 @@ pub mod chat;
 pub mod chat_helpers;
 pub mod login;
 pub mod settings;
+pub mod settings_forms;
 pub mod landing;
 pub mod lorebooks;
 pub mod presets;
