@@ -7,9 +7,11 @@ pub(super) fn Thought(#[prop(into)] text: Signal<String>, forbid_media: bool) ->
 
     view! {
         <div>
-            <div class="thought-toggle" on:click=move |_| set_open.update(|o| *o = !*o)>
-                "Thought "{move || if open.get() { "-" } else { "+" }}
-            </div>
+            <Show when=move || !text.get().is_empty()>
+                <div class="thought-toggle" on:click=move |_| set_open.update(|o| *o = !*o)>
+                    "Thought "{move || if open.get() { "-" } else { "+" }}
+                </div>
+            </Show>
             <Show when=move || open.get()>
                 <div class="thought-content">
                     {move || crate::render::markdown::render_markdown(&text.get(), "", "", forbid_media)}

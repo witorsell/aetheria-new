@@ -1350,11 +1350,9 @@ pub fn ChatPage() -> impl IntoView {
                                 <strong>{move || if is_self_reply.get() { user_name_sig.get() } else { streaming_speaker.get().0 }}</strong>
                             </div>
                             <div class="message-body">
-                                <Show when=move || has_thought.get()>
-                                    <Thought forbid_media=forbid_media() text=Signal::derive(move || {
-                                        extracted_stream.get().1.unwrap_or_default()
-                                    }) />
-                                </Show>
+                                <Thought forbid_media=forbid_media() text=Signal::derive(move || {
+                                    extracted_stream.get().1.unwrap_or_default()
+                                }) />
                                 <div>
                                     {move || {
                                         crate::render::markdown::render_markdown(
