@@ -4,7 +4,6 @@ use crate::state::AppState;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures_util::StreamExt;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::convert::Infallible;
 
@@ -290,15 +289,21 @@ pub(crate) fn run_group_generation(
                 prepared.raw_prompt, prepared.prompt_tokens, prepared.context_limit, Some(character_id.clone()),
             ).await;
 
-            if let Ok(saved_msg) = saved {
-                parent_id_for_reply = saved_msg.id.clone();
-                history.push(crate::models::message::MessageNode {
-                    user_id, id: saved_msg.id.clone(), parent_id: saved_msg.parent_id.clone(),
-                    role: Role::Assistant.to_string(), content: cleaned, visible: true, deleted: false,
-                    created_at: saved_msg.created_at, children: Vec::new(),
-                    raw_prompt: saved_msg.raw_prompt.clone(), prompt_tokens: saved_msg.prompt_tokens,
-                    context_limit: saved_msg.context_limit, character_id: Some(character_id.clone()),
-                });
+            match saved {
+                Ok(saved_msg) => {
+                    parent_id_for_reply = saved_msg.id.clone();
+                    history.push(crate::models::message::MessageNode {
+                        user_id, id: saved_msg.id.clone(), parent_id: saved_msg.parent_id.clone(),
+                        role: Role::Assistant.to_string(), content: cleaned, visible: true, deleted: false,
+                        created_at: saved_msg.created_at, children: Vec::new(),
+                        raw_prompt: saved_msg.raw_prompt.clone(), prompt_tokens: saved_msg.prompt_tokens,
+                        context_limit: saved_msg.context_limit, character_id: Some(character_id.clone()),
+                    });
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to save assistant message for {}", character_id);
+                    yield Ok(Event::default().event("error").data(format!("failed to save message: {}", e)));
+                }
             }
         }
 
@@ -410,7 +415,7 @@ pub(crate) async fn run_generation(
     let finishing_stream = sse_stream.chain(futures_util::stream::once(async move {
         let final_content = accumulated.lock().await.clone();
         if !final_content.is_empty() {
-            if let Err(e) = writer
+            let save_result = writer
                 .create_assistant_message_with_prompt(user_id, chat_id_for_finish,
                     Some(parent_id_for_reply),
                     final_content,
@@ -419,9 +424,13 @@ pub(crate) async fn run_generation(
                     context_limit,
                     None,
                 )
-                .await
-            {
-                tracing::error!(error = %e, "failed to save assistant message");
+                .await;
+            match save_result {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to save assistant message");
+                    return Ok(Event::default().event("error").data(format!("failed to save message: {}", e)));
+                }
             }
             tokio::spawn(async move {
                 crate::memory::maybe_update_chat_summary(&state_for_memory, user_id, &chat_id_for_memory).await;

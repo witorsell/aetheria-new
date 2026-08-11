@@ -1,6 +1,6 @@
 use crate::provider::ProviderError;
 use crate::state::AppState;
-use crate::routes::generation_orchestrator::{resolve_provider, assemble_generation, run_generation, PreparedGeneration, EventStream};
+use crate::routes::generation_orchestrator::{resolve_provider, assemble_generation, run_generation, EventStream};
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
