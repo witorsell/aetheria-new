@@ -1,1 +1,0 @@
-ALTER TABLE characters ADD COLUMN talkativeness REAL NOT NULL DEFAULT 0.5;

@@ -1,1 +1,0 @@
-ALTER TABLE settings ADD COLUMN exclude_thinking_from_max_tokens BOOLEAN NOT NULL DEFAULT FALSE;

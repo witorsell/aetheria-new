@@ -209,26 +209,22 @@ netstat -tulpn | grep 4310
 kill -9 <PID>
 ```
 
-**Migration checksum errors** (`VersionMismatch`/`VersionMissing`) mean `crates/server/migrations/` and the db's `_sqlx_migrations` table disagree, usually from a rebased branch or two migrations grabbing the same number. Check what's actually recorded first:
+All database migrations are squashed into a single clean baseline migration `0001_init.sql`.
+
+**Migration checksum errors** (`VersionMismatch`/`VersionMissing`) mean `crates/server/migrations/` and the db's `_sqlx_migrations` table disagree. Check what's recorded first:
 
 ```bash
 sqlite3 crates/server/aetheria.sqlite3 "SELECT version, description, hex(checksum) FROM _sqlx_migrations ORDER BY version DESC LIMIT 5;"
 ```
 
-Missing file: recreate it at the same version so the checksum lines up, or if you can't recover the original content, write something schema-compatible and fix the checksum by hand:
-
-```bash
-CHK=$(sha384sum crates/server/migrations/000N_whatever.sql | awk '{print $1}')
-sqlite3 crates/server/aetheria.sqlite3 "UPDATE _sqlx_migrations SET checksum = X'$CHK' WHERE version=N;"
-```
-
-Collision on the same number instead? Renumber yours, leave the one already applied alone. And since `migrations/` gets embedded at compile time, a bare `cargo build` right after editing it sometimes no-ops in under a second. Touch `crates/server/src/db/mod.rs` first if a build finishes suspiciously fast.
+Since `migrations/` gets embedded at compile time via `sqlx::migrate!`, touch `crates/server/src/db/mod.rs` if a build finishes without picking up migration edits.
 
 ### Nginx
 
 Auto-generate `deploy/nginx-aetheria.conf` directly from your `.env` variables (`AETHERIA_BIND`, `MAX_UPLOAD_SIZE_MB`, `AETHERIA_DOMAIN`):
 
 ```bash
+chmod +x deploy/generate-nginx-config.sh
 ./deploy/generate-nginx-config.sh
 ```
 

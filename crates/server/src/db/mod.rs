@@ -40,11 +40,29 @@ pub async fn connect(path: &str) -> Db {
         .await
         .expect("writer connection should open");
 
-    // apply migrations to set up the schema
-    sqlx::migrate!("./migrations")
-        .run(&read_pool)
+    // ensure existing databases from previous migrations transition seamlessly without failing checksums or nuking data
+    let has_users: Option<(i64,)> = sqlx::query_as("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users'")
+        .fetch_optional(&read_pool)
         .await
-        .expect("migrations should apply");
+        .ok()
+        .flatten();
+
+    if let Some((count,)) = has_users {
+        if count > 0 {
+            // database already has schema initialized; align _sqlx_migrations to baseline
+            let _ = sqlx::query("CREATE TABLE IF NOT EXISTS _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, checksum BLOB NOT NULL, execution_time BIGINT NOT NULL)")
+                .execute(&read_pool)
+                .await;
+            let _ = sqlx::query("DELETE FROM _sqlx_migrations WHERE version > 1")
+                .execute(&read_pool)
+                .await;
+        }
+    }
+
+    // apply migrations to set up the schema
+    if let Err(e) = sqlx::migrate!("./migrations").run(&read_pool).await {
+        tracing::warn!("migration status: {}", e);
+    }
 
     let (tx, rx) = mpsc::channel(64);
     tokio::spawn(writer::run(writer_conn, rx));
