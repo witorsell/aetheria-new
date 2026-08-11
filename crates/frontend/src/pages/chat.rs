@@ -539,7 +539,6 @@ pub fn ChatPage() -> impl IntoView {
                 set_current_member.set(None);
                 set_group_reply_log.set(Vec::new());
                 set_regenerating_msg_id.set(None);
-                set_selected_children.set(HashMap::new());
                 fetch_tree();
             });
         }
@@ -684,7 +683,6 @@ pub fn ChatPage() -> impl IntoView {
                 set_streaming_reply.set(String::new());
                 set_current_member.set(None);
                 set_group_reply_log.set(Vec::new());
-                set_selected_children.set(HashMap::new());
                 fetch_tree();
             });
         }
