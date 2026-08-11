@@ -82,14 +82,14 @@ pub async fn connect(path: &str) -> Db {
             .bind(base_checksum.as_slice())
             .execute(&read_pool)
             .await;
+        } else {
+            // no schema yet, run migrations to create it
+            migrator
+                .run(&read_pool)
+                .await
+                .expect("migrations should apply");
         }
     }
-
-    // apply migrations to set up the schema
-    migrator
-        .run(&read_pool)
-        .await
-        .expect("migrations should apply");
 
     let (tx, rx) = mpsc::channel(64);
     tokio::spawn(writer::run(writer_conn, rx));
