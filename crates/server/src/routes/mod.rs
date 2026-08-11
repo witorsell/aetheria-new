@@ -6,6 +6,7 @@ use axum::routing::{delete, get, post, put};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::catch_panic::CatchPanicLayer;
 use tower::ServiceBuilder;
 
 fn base_path() -> std::path::PathBuf {
@@ -131,6 +132,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(protected)
         .nest("/api/v1", protected_v1)
         .layer(DefaultBodyLimit::max(get_max_upload_bytes()))
+        .layer(CatchPanicLayer::new())
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(

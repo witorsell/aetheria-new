@@ -6,5 +6,4 @@ members = ["crates/frontend", "crates/server"]
 opt-level = "z"
 lto = true
 codegen-units = 1
-panic = "abort"
-strip = true
+# panic = "unwind" (default) so panics in one handler 500 instead of killing the process

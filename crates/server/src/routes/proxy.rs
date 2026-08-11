@@ -98,7 +98,7 @@ pub async fn proxy_image(Extension(_user_id): Extension<i64>,
 
         return (
             [
-                (axum::http::header::CONTENT_TYPE, HeaderValue::from_str(&cached.content_type).unwrap()),
+                (axum::http::header::CONTENT_TYPE, HeaderValue::from_str(&cached.content_type).unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"))),
                 (axum::http::header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600, immutable")),
             ],
             cached.bytes,
@@ -144,7 +144,7 @@ pub async fn proxy_image(Extension(_user_id): Extension<i64>,
 
     (
         [
-            (axum::http::header::CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap()),
+            (axum::http::header::CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"))),
             (axum::http::header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600, immutable")),
         ],
         bytes,
