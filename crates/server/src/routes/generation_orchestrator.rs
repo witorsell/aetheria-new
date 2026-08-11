@@ -204,7 +204,13 @@ pub(crate) async fn assemble_generation(
 pub(crate) async fn load_group_roster(
     state: &AppState, user_id: i64, group_id: &str,
 ) -> (Vec<crate::group_activation::ActivationCandidate>, HashMap<String, crate::models::character::Character>, HashMap<String, String>) {
-    let members = crate::models::group::list_members(&state.db.read_pool, group_id).await.unwrap_or_default();
+    let members = match crate::models::group::list_members(&state.db.read_pool, group_id).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!(group_id, error = %e, "failed to load group members");
+            vec![]
+        }
+    };
     let mut candidates = Vec::new();
     let mut characters_by_id = HashMap::new();
     let mut all_names = HashMap::new();
