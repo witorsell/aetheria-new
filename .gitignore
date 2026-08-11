@@ -1,0 +1,16 @@
+/target
+/dist
+crates/server/*.sqlite3*
+aetheria.sqlite3*
+/aetheria.db
+crates/server/uploads/
+*.py
+*.json
+!crates/server/assets/*.json
+*.db
+*.sqlite3
+.env
+deploy/nginx-aetheria.conf
+backups/
+scripts/
+*.log

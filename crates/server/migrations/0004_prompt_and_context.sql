@@ -1,0 +1,5 @@
+ALTER TABLE messages ADD COLUMN raw_prompt TEXT;
+ALTER TABLE messages ADD COLUMN prompt_tokens INTEGER;
+ALTER TABLE messages ADD COLUMN context_limit INTEGER;
+
+ALTER TABLE settings ADD COLUMN context_limit INTEGER NOT NULL DEFAULT 8192;

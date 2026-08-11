@@ -1,0 +1,1 @@
+ALTER TABLE characters ADD COLUMN insert_depth INTEGER NOT NULL DEFAULT 3;

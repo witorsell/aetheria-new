@@ -1,0 +1,11 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[[proxy]]
+backend = "http://127.0.0.1:4310/api"
+rewrite = "/api"
+
+[[proxy]]
+backend = "http://127.0.0.1:4310/uploads"
+rewrite = "/uploads"

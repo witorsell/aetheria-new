@@ -1,0 +1,12 @@
+pub mod character_chats;
+pub mod character_editor;
+pub mod character_profile;
+pub mod characters;
+pub mod chat;
+pub mod login;
+pub mod settings;
+pub mod landing;
+pub mod lorebooks;
+pub mod presets;
+pub mod terms;
+pub mod privacy;

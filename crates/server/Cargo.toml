@@ -1,0 +1,57 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[features]
+default = []
+local-embeddings = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:hf-hub"]
+
+[dependencies]
+aes-gcm = "0.10.3"
+argon2 = "0.5.3"
+async-stream = "0.3.6"
+async-trait = "0.1.86"
+axum = { version = "0.8.9", features = ["multipart"] }
+bytes = "1"
+axum-extra = { version = "0.12.6", features = ["cookie", "cookie-private"] }
+base64 = "0.23.0"
+moka = { version = "0.12", features = ["future"] }
+cookie = { version = "0.18.1", features = ["key-expansion"] }
+futures-util = "0.3.33"
+png = "0.18.1"
+rand = { version = "0.8", features = ["std"] }
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "migrate"] }
+tokio = { version = "1.53.1", features = ["full"] }
+tower-http = { version = "0.7.0", features = ["fs", "trace", "set-header"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
+url = "2.5.8"
+ipnet = "2.12.1"
+image = "0.25.10"
+regex = "1.11.3"
+candle-core = { version = "0.11", optional = true }
+candle-nn = { version = "0.11", optional = true }
+candle-transformers = { version = "0.11", optional = true }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"], optional = true }
+ahash = "0.8"
+tower = { version = "0.5.3", features = ["util"] }
+hf-hub = { version = "0.4", optional = true }
+dotenvy = "0.15.7"
+
+
+[dev-dependencies]
+futures-util = "0.3.33"
+http-body-util = "0.1.4"

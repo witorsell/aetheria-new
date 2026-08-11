@@ -1,0 +1,1 @@
+ALTER TABLE alternate_greetings ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1;
