@@ -33,9 +33,16 @@ impl Writer {
 
     pub async fn upsert_user(&self, username: String, password_hash: String) -> sqlx::Result<()> {
         self.dispatch(move |conn| Box::pin(async move {
+            // only create the initial user if the table is empty
+            // never overwrite existing users even if their env creds change
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+                .fetch_one(&mut *conn)
+                .await?;
+            if count > 0 {
+                return Ok(());
+            }
             sqlx::query(
-                "INSERT INTO users (id, username, password_hash, session_secret) VALUES (1, ?, ?, '')
-                 ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash",
+                "INSERT INTO users (id, username, password_hash, session_secret) VALUES (1, ?, ?, '')",
             )
             .bind(username)
             .bind(password_hash)

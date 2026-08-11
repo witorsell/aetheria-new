@@ -38,6 +38,14 @@ pub fn resolve_path(relative: &str) -> std::path::PathBuf {
 }
 
 pub async fn bootstrap_user(db: &db::Db, username: &str, password: &str) {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&db.read_pool)
+        .await
+        .expect("failed to count users");
+    if count > 0 {
+        tracing::info!("users already exist, skipping bootstrap");
+        return;
+    }
     let hash = auth::hash_password(password);
     db.writer
         .upsert_user(username.to_string(), hash)
