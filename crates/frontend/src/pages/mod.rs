@@ -3,6 +3,7 @@ pub mod character_editor;
 pub mod character_profile;
 pub mod characters;
 pub mod chat;
+pub mod chat_helpers;
 pub mod login;
 pub mod settings;
 pub mod landing;

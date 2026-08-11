@@ -23,6 +23,7 @@ fn get_max_upload_bytes() -> usize {
 pub mod chats;
 pub mod characters;
 pub mod generate;
+pub mod generation_orchestrator;
 pub mod settings;
 pub mod import_export;
 pub mod proxy;
