@@ -211,10 +211,24 @@ kill -9 <PID>
 
 All database migrations are squashed into a single clean baseline migration `0001_init.sql`.
 
-**Migration checksum errors** (`VersionMismatch`/`VersionMissing`) mean `crates/server/migrations/` and the db's `_sqlx_migrations` table disagree. Check what's recorded first:
+**Automatic migration reconciliation:** when the server starts, `db/mod.rs` detects
+existing databases whose `_sqlx_migrations` table contains stale entries from the
+pre-squashed multi-migration setup (versions 1–27 with old checksums). It extracts
+the correct SHA-384 checksum from the compile-time-embedded `Migrator` and rewrites
+`_sqlx_migrations` to the new baseline, no manual intervention needed.
+
+**Manual fix (if needed):** if the automatic reconciliation fails, check what's
+recorded first:
 
 ```bash
 sqlite3 crates/server/aetheria.sqlite3 "SELECT version, description, hex(checksum) FROM _sqlx_migrations ORDER BY version DESC LIMIT 5;"
+```
+
+The checksum is the SHA-384 of the migration SQL. To reset manually:
+
+```bash
+CHK=$(sha384sum crates/server/migrations/0001_init.sql | awk '{print $1}')
+sqlite3 crates/server/aetheria.sqlite3 "DELETE FROM _sqlx_migrations; INSERT INTO _sqlx_migrations VALUES (1, 'init', CURRENT_TIMESTAMP, X'$CHK', 0);"
 ```
 
 Since `migrations/` gets embedded at compile time via `sqlx::migrate!`, touch `crates/server/src/db/mod.rs` if a build finishes without picking up migration edits.

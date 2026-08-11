@@ -34,35 +34,62 @@ pub async fn connect(path: &str) -> Db {
         .await
         .expect("read pool should connect");
 
-
-
     let writer_conn: SqliteConnection = SqliteConnection::connect_with(&options)
         .await
         .expect("writer connection should open");
 
-    // ensure existing databases from previous migrations transition seamlessly without failing checksums or nuking data
-    let has_users: Option<(i64,)> = sqlx::query_as("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users'")
+    // get the checksum sqlx expects for our baseline migration from the embedded migrator
+    let migrator = sqlx::migrate!("./migrations");
+    let base_checksum: Vec<u8> = migrator
+        .migrations
+        .first()
+        .map(|m| m.checksum.to_vec())
+        .unwrap_or_default();
+
+    // check if _sqlx_migrations already has the correct baseline
+    let has_baseline: Option<(i64,)> = sqlx::query_as(
+        "SELECT count(*) FROM _sqlx_migrations WHERE version = 1 AND checksum = ?",
+    )
+    .bind(base_checksum.as_slice())
+    .fetch_optional(&read_pool)
+    .await
+    .ok()
+    .flatten();
+
+    if has_baseline.map_or(true, |(c,)| c == 0) {
+        // stale migration records or table doesn't exist yet;
+        // if schema is already present (old db), just fix the tracking table
+        let has_schema: Option<(i64,)> = sqlx::query_as(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users'",
+        )
         .fetch_optional(&read_pool)
         .await
         .ok()
         .flatten();
 
-    if let Some((count,)) = has_users {
-        if count > 0 {
-            // database already has schema initialized; align _sqlx_migrations to baseline
-            let _ = sqlx::query("CREATE TABLE IF NOT EXISTS _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL, installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, checksum BLOB NOT NULL, execution_time BIGINT NOT NULL)")
+        if has_schema.map_or(false, |(c,)| c > 0) {
+            tracing::info!(
+                "existing database detected, reconciling _sqlx_migrations to squashed baseline"
+            );
+            let _ = sqlx::query("DELETE FROM _sqlx_migrations")
                 .execute(&read_pool)
                 .await;
-            let _ = sqlx::query("DELETE FROM _sqlx_migrations WHERE version > 1")
-                .execute(&read_pool)
-                .await;
+            let _ = sqlx::query(
+                "INSERT INTO _sqlx_migrations \
+                 (version, description, installed_on, checksum, execution_time) \
+                 VALUES (1, 'init', CURRENT_TIMESTAMP, ?, 0)",
+            )
+            .bind(base_checksum.as_slice())
+            .execute(&read_pool)
+            .await;
         }
     }
 
     // apply migrations to set up the schema
-    if let Err(e) = sqlx::migrate!("./migrations").run(&read_pool).await {
-        tracing::warn!("migration status: {}", e);
-    }
+    migrator
+        .run(&read_pool)
+        .await
+        .expect("migrations should apply");
 
     let (tx, rx) = mpsc::channel(64);
     tokio::spawn(writer::run(writer_conn, rx));
