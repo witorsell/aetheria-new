@@ -36,12 +36,22 @@ fn substitute_pattern_macros(pattern: &str, char_name: &str, user_name: &str, mo
 
 // strips trim_strings entries out of a captured group, matches filterString
 fn filter_string(raw: &str, trim_strings: &[String], char_name: &str, user_name: &str) -> String {
-    let mut result = raw.to_string();
-    for trim in trim_strings {
-        let sub = substitute_macros(trim, char_name, user_name);
-        result = result.replace(&sub, "");
+    let subs: Vec<String> = trim_strings
+        .iter()
+        .filter_map(|trim| {
+            let sub = substitute_macros(trim, char_name, user_name);
+            if sub.is_empty() { None } else { Some(sub) }
+        })
+        .collect();
+    if subs.is_empty() {
+        return raw.to_string();
     }
-    result
+    let pattern = subs.iter()
+        .map(|s| regex::escape(s))
+        .collect::<Vec<_>>()
+        .join("|");
+    let re = regex::Regex::new(&pattern).expect("escaped patterns should compile");
+    re.replace_all(raw, "").into_owned()
 }
 
 // expands $1/$<name> refs, matches runRegexScript's replaceWithGroups
