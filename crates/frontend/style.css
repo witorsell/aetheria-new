@@ -1613,3 +1613,30 @@ p.muted {
   font-size: 0.95rem;
   font-weight: 700;
 }
+
+.mascot {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 0 12px var(--mascot-accent, transparent));
+}
+.mascot-disabled .mascot {
+  display: none;
+}
+.reduced-motion .mascot {
+  transition: none !important;
+}
+.mascot-corner {
+  position: fixed;
+  bottom: -80px;
+  right: 2rem;
+  width: 90px;
+  cursor: pointer;
+  transition: bottom 400ms ease;
+  z-index: 40;
+}
+.mascot-corner.visible {
+  bottom: -20px;
+}
+.mascot-corner:hover {
+  bottom: 0px;
+}
