@@ -5,12 +5,16 @@ use serde::{Deserialize, Serialize};
 pub struct ThemeTokens {
     pub color_bg: String,
     pub color_surface: String,
+    pub color_surface_hover: String,
     pub color_border: String,
     pub color_accent: String,
     pub color_accent_2: String,
+    pub color_accent_hover: String,
     pub color_text: String,
     pub color_text_muted: String,
+    pub color_text_heading: String,
     pub color_error: String,
+    pub color_error_bg: String,
     pub font_heading: String,
     pub font_body: String,
     pub font_scale: f64,
@@ -36,12 +40,16 @@ impl Default for ThemeTokens {
         ThemeTokens {
             color_bg: "#0a0a0c".into(),
             color_surface: "transparent".into(),
+            color_surface_hover: "rgba(255, 255, 255, 0.04)".into(),
             color_border: "rgba(255, 255, 255, 0.08)".into(),
             color_accent: "#7c5cff".into(),
             color_accent_2: "#ff9ecf".into(),
+            color_accent_hover: "#9b80ff".into(),
             color_text: "#ffffff".into(),
             color_text_muted: "#a09aad".into(),
+            color_text_heading: "#ffffff".into(),
             color_error: "#f43f5e".into(),
+            color_error_bg: "rgba(244, 63, 94, 0.05)".into(),
             font_heading: "'Quicksand', system-ui, sans-serif".into(),
             font_body: "'Inter', system-ui, sans-serif".into(),
             font_scale: 1.0,
@@ -89,7 +97,7 @@ struct ActivateThemeInput<'a> {
 }
 
 #[derive(Deserialize)]
-struct ImportStResult {
+struct ImportResult {
     theme: Theme,
     warning: Option<String>,
 }
@@ -145,7 +153,7 @@ pub async fn export_theme(id: &str) -> Result<String, String> {
         .text().await.map_err(|e| e.to_string())
 }
 
-pub async fn import_theme(file: web_sys::File) -> Result<Theme, String> {
+pub async fn import_theme(file: web_sys::File) -> Result<(Theme, Option<String>), String> {
     let form = web_sys::FormData::new().map_err(|_| "Failed to create FormData")?;
     form.append_with_blob("file", &file).map_err(|_| "Failed to append file")?;
     let resp = Request::post("/api/themes/import")
@@ -155,7 +163,8 @@ pub async fn import_theme(file: web_sys::File) -> Result<Theme, String> {
     if !resp.ok() {
         return Err(resp.text().await.unwrap_or_default());
     }
-    resp.json().await.map_err(|e| e.to_string())
+    let result: ImportResult = resp.json().await.map_err(|e| e.to_string())?;
+    Ok((result.theme, result.warning))
 }
 
 pub async fn import_st_theme(file: web_sys::File) -> Result<(Theme, Option<String>), String> {
@@ -168,7 +177,7 @@ pub async fn import_st_theme(file: web_sys::File) -> Result<(Theme, Option<Strin
     if !resp.ok() {
         return Err(resp.text().await.unwrap_or_default());
     }
-    let result: ImportStResult = resp.json().await.map_err(|e| e.to_string())?;
+    let result: ImportResult = resp.json().await.map_err(|e| e.to_string())?;
     Ok((result.theme, result.warning))
 }
 

@@ -82,7 +82,7 @@ html, body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-body);
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale));
   line-height: 1.5;
 }
 
@@ -156,6 +156,17 @@ button.primary:hover:not(:disabled), .btn.primary:hover:not(:disabled) {
   width: 18px;
   height: 18px;
 }
+.send-btn.primary {
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+}
+.send-btn.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border: none;
+  color: #fff;
+}
 
 button.ghost, .btn.ghost {
   color: var(--color-text-muted);
@@ -187,9 +198,9 @@ button:disabled {
 .sidebar {
   width: 280px;
   flex-shrink: 0;
-  background: rgba(11, 11, 14, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--color-bg) 70%, transparent);
+  backdrop-filter: blur(calc(12px + var(--blur-strength)));
+  -webkit-backdrop-filter: blur(calc(12px + var(--blur-strength)));
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -247,6 +258,20 @@ button:disabled {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* avatar shape, driven by the active theme's avatar_style token */
+.avatar-circle .character-avatar,
+.avatar-circle .character-avatar img {
+  border-radius: 50%;
+}
+.avatar-rounded .character-avatar,
+.avatar-rounded .character-avatar img {
+  border-radius: var(--radius-md);
+}
+.avatar-square .character-avatar,
+.avatar-square .character-avatar img {
+  border-radius: 0;
 }
 
 .character-list-item {
@@ -415,13 +440,13 @@ button:disabled {
   display: flex;
   flex-direction: column;
   min-width: 200px;
-  background: rgba(11, 11, 14, 0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--color-bg) 90%, transparent);
+  backdrop-filter: blur(calc(12px + var(--blur-strength)));
+  -webkit-backdrop-filter: blur(calc(12px + var(--blur-strength)));
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, calc(0.4 * var(--shadow-strength)));
 }
 .more-menu-item {
   background: transparent;
@@ -455,14 +480,14 @@ button:disabled {
 .modal-box {
   background: #0f0f13;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
   padding: 1.25em;
   max-width: 640px;
   width: 100%;
   max-height: 85vh;
   overflow-y: auto;
   margin: auto;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, calc(0.8 * var(--shadow-strength)));
 }
 .modal-header {
   display: flex;
@@ -525,6 +550,16 @@ button:disabled {
   padding: 0;
 }
 
+/* the chat column's own width knob (SillyTavern calls this "chat width");
+   scoped to desktop so a narrow --chat-width can't squeeze the already-tight
+   mobile layout */
+@media (min-width: 769px) {
+  .message-list {
+    max-width: var(--chat-width);
+    margin: 0 auto;
+  }
+}
+
 .message-row {
   position: relative;
   display: flex;
@@ -575,11 +610,20 @@ button:disabled {
   flex: 1;
   gap: 0.35em;
   min-width: 0;
+}
+/* chat display, driven by the active theme's chat_display token: "bubble"
+   is the accent rail look this app already shipped with, "flat" drops the
+   rail and indent for a plainer list of messages */
+.chat-bubble .message-content-wrapper {
   border-left: 2px solid transparent;
   padding-left: 0.75em;
 }
-.message-row.assistant .message-content-wrapper {
+.chat-bubble .message-row.assistant .message-content-wrapper {
   border-left-color: var(--color-accent);
+}
+.chat-flat .message-content-wrapper {
+  border-left: none;
+  padding-left: 0;
 }
 .message-row.user .message-content-wrapper {
   /* optional user styling */
@@ -754,9 +798,9 @@ button:disabled {
     gap: 0.75em;
     height: 48px;
     padding: 0 1em;
-    background: rgba(11, 11, 14, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--color-bg) 70%, transparent);
+    backdrop-filter: blur(calc(12px + var(--blur-strength)));
+    -webkit-backdrop-filter: blur(calc(12px + var(--blur-strength)));
     border-bottom: 1px solid var(--color-border);
     position: sticky;
     top: 0;
@@ -822,7 +866,7 @@ button:disabled {
   position: relative;
   overflow-y: auto;
   overflow-x: hidden;
-  background: #0a0a0c;
+  background: var(--color-bg);
 }
 
 .landing-left {
@@ -916,9 +960,9 @@ button:disabled {
     display: flex;
     gap: 0.5em;
     padding: 0.75em 1em;
-    background: rgba(11, 11, 14, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--color-bg) 70%, transparent);
+    backdrop-filter: blur(calc(12px + var(--blur-strength)));
+    -webkit-backdrop-filter: blur(calc(12px + var(--blur-strength)));
     border-top: 1px solid var(--color-border);
     z-index: 15;
   }

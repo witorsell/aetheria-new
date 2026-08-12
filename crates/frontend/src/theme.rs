@@ -20,12 +20,16 @@ pub fn apply_tokens_to_root(tokens: &ThemeTokens) {
 
     let _ = style.set_property("--color-bg", &tokens.color_bg);
     let _ = style.set_property("--color-surface", &tokens.color_surface);
+    let _ = style.set_property("--color-surface-hover", &tokens.color_surface_hover);
     let _ = style.set_property("--color-border", &tokens.color_border);
     let _ = style.set_property("--color-accent", &tokens.color_accent);
     let _ = style.set_property("--color-accent-2", &tokens.color_accent_2);
+    let _ = style.set_property("--color-accent-hover", &tokens.color_accent_hover);
     let _ = style.set_property("--color-text", &tokens.color_text);
     let _ = style.set_property("--color-text-muted", &tokens.color_text_muted);
+    let _ = style.set_property("--color-text-heading", &tokens.color_text_heading);
     let _ = style.set_property("--color-error", &tokens.color_error);
+    let _ = style.set_property("--color-error-bg", &tokens.color_error_bg);
     let _ = style.set_property("--font-heading", &tokens.font_heading);
     let _ = style.set_property("--font-body", &tokens.font_body);
     let _ = style.set_property("--font-scale", &tokens.font_scale.to_string());
