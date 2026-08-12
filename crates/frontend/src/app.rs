@@ -8,6 +8,7 @@ use crate::pages::login::LoginPage;
 use crate::pages::settings::SettingsPage;
 use crate::pages::lorebooks::{LorebooksPage, LorebookEditorPage};
 use crate::pages::presets::{PresetsPage, PresetEditorPage};
+use crate::pages::themes::{ThemesPage, ThemeEditorPage};
 use crate::pages::landing::LandingPage;
 use crate::pages::terms::TermsPage;
 use crate::pages::privacy::PrivacyPage;
@@ -88,6 +89,14 @@ pub fn App() -> impl IntoView {
                             <Route
                                 path=(StaticSegment("presets"), ParamSegment("id"), StaticSegment("edit"))
                                 view=|| view! { <Sidebar><PresetEditorPage /></Sidebar> }
+                            />
+                            <Route
+                                path=StaticSegment("themes")
+                                view=|| view! { <Sidebar><ThemesPage /></Sidebar> }
+                            />
+                            <Route
+                                path=(StaticSegment("themes"), ParamSegment("id"), StaticSegment("edit"))
+                                view=|| view! { <Sidebar><ThemeEditorPage /></Sidebar> }
                             />
                             <Route
                                 path=StaticSegment("settings")

@@ -11,4 +11,5 @@ pub mod landing;
 pub mod lorebooks;
 pub mod presets;
 pub mod terms;
+pub mod themes;
 pub mod privacy;

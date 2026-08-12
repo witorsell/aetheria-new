@@ -49,6 +49,7 @@ pub fn Sidebar(children: Children) -> impl IntoView {
                     <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/characters")}>"Library"</div>
                     <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/lorebooks")}>"Lorebooks"</div>
                     <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/presets")}>"Presets"</div>
+                    <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/themes")}>"Themes"</div>
                     <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/settings")}>"System"</div>
                 </div>
             </aside>
