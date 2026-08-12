@@ -74,6 +74,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/themes/{id}", get(themes::get_theme).put(themes::update).delete(themes::delete))
         .route("/api/themes/{id}/export", get(themes::export_theme))
         .route("/api/themes/activate", post(themes::activate))
+        .route("/api/themes/import", post(themes::import))
+        .route("/api/themes/import-st", post(themes::import_st))
         // regex scripts
         .route("/api/regex-scripts", get(regex_scripts::list).post(regex_scripts::import))
         .route("/api/regex-scripts/export", get(regex_scripts::export_all))

@@ -1,7 +1,8 @@
 use crate::error::ApiError;
 use crate::models::theme::{self, Theme, ThemeExport, ThemeTokens, BUILTIN_DEFAULT_ID, BUILTIN_LIGHT_ID};
 use crate::state::AppState;
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Multipart, Path, State};
+use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
@@ -135,4 +136,78 @@ pub async fn activate(
 ) -> Result<axum::http::StatusCode, ApiError> {
     state.db.writer.set_active_theme(user_id, input.theme_id).await?;
     Ok(axum::http::StatusCode::OK)
+}
+
+async fn read_multipart_file(multipart: &mut Multipart) -> Result<(bytes::Bytes, Option<String>), String> {
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(f)) => f,
+            Ok(None) => return Err("No file uploaded".to_string()),
+            Err(e) => return Err(format!("Upload failed: {e}")),
+        };
+        if field.name() == Some("file") {
+            let filename = field.file_name().map(|s| s.to_string());
+            return field.bytes().await.map(|b| (b, filename)).map_err(|e| format!("Upload failed: {e}"));
+        }
+    }
+}
+
+pub async fn import(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let (bytes, filename) = match read_multipart_file(&mut multipart).await {
+        Ok(v) => v,
+        Err(e) => return (axum::http::StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let export: ThemeExport = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return (axum::http::StatusCode::BAD_REQUEST, "Invalid theme JSON").into_response(),
+    };
+    let name = if export.name.trim().is_empty() {
+        filename.map(|f| f.trim_end_matches(".json").to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Imported Theme".into())
+    } else {
+        export.name
+    };
+    if let Err(e) = validate(&name, &export.tokens) {
+        return (axum::http::StatusCode::BAD_REQUEST, format!("{:?}", e)).into_response();
+    }
+    match state.db.writer.create_theme(user_id, name, export.tokens).await {
+        Ok(theme) => Json(theme).into_response(),
+        Err(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to save theme").into_response(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct ImportStResult {
+    theme: Theme,
+    warning: Option<String>,
+}
+
+pub async fn import_st(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let (bytes, filename) = match read_multipart_file(&mut multipart).await {
+        Ok(v) => v,
+        Err(e) => return (axum::http::StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let raw: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return (axum::http::StatusCode::BAD_REQUEST, "Invalid JSON").into_response(),
+    };
+    let (tokens, warning) = theme::st_to_aetheria(&raw);
+    let name = raw.get("name").and_then(|v| v.as_str()).map(|s| s.to_string())
+        .or_else(|| filename.map(|f| f.trim_end_matches(".json").to_string()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Imported SillyTavern Theme".into());
+    if let Err(e) = validate(&name, &tokens) {
+        return (axum::http::StatusCode::BAD_REQUEST, format!("{:?}", e)).into_response();
+    }
+    match state.db.writer.create_theme(user_id, name, tokens).await {
+        Ok(theme) => Json(ImportStResult { theme, warning }).into_response(),
+        Err(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Failed to save theme").into_response(),
+    }
 }
