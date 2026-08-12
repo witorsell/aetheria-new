@@ -40,19 +40,22 @@ pub fn CharacterList() -> impl IntoView {
     view! {
         <div class="sidebar-characters">
             {move || {
-                let list = characters.get().unwrap_or_default();
-                if list.is_empty() {
-                    view! {
+                match characters.get() {
+                    // still loading: `LocalResource::get()` is `None` until the
+                    // first fetch resolves, distinct from "loaded and empty".
+                    // rendering nothing here avoids a flash of the empty-state
+                    // mascot on every page load, even for accounts with characters.
+                    None => ().into_any(),
+                    Some(list) if list.is_empty() => view! {
                         <div class="mascot-empty-state">
                             <crate::components::mascot::Aeth state=Signal::derive(|| crate::components::mascot::MascotState::Empty) class="mascot-empty" />
                             <p style="color: var(--color-text-muted); font-size: 0.875rem;">"No one's here yet."</p>
                         </div>
-                    }.into_any()
-                } else {
-                    list.into_iter()
+                    }.into_any(),
+                    Some(list) => list.into_iter()
                         .map(|character: Character| view! { <CharacterListItem character=character forbid_media=forbid_media /> })
                         .collect_view()
-                        .into_any()
+                        .into_any(),
                 }
             }}
         </div>
