@@ -106,6 +106,33 @@ pub async fn stream_post(
         return Ok(());
     }
 
+    if !response.ok() {
+        // a non-2xx body is a JSON {code, message} error object (see
+        // server::error::ApiError), not an SSE stream - feeding it to the
+        // line parser below would just never find a "\n\n" event boundary
+        // and silently return Ok(()) once the reader hits EOF, as if
+        // generation had completed normally with no reply
+        let status = response.status();
+        let message = match JsFuture::from(response.text().map_err(|e| format!("{e:?}"))?).await {
+            Ok(text_value) => {
+                let text = text_value.as_string().unwrap_or_default();
+                serde_json::from_str::<serde_json::Value>(&text)
+                    .ok()
+                    .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(|s| s.to_string()))
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or(text)
+            }
+            Err(_) => String::new(),
+        };
+        let message = if message.trim().is_empty() {
+            format!("request failed with status {status}")
+        } else {
+            message
+        };
+        on_error(message);
+        return Ok(());
+    }
+
     let body = response.body().ok_or("no response body")?;
     let reader: web_sys::ReadableStreamDefaultReader =
         body.get_reader().dyn_into().map_err(|e| format!("{e:?}"))?;
@@ -116,7 +143,14 @@ pub async fn stream_post(
     loop {
         let chunk_value = match JsFuture::from(reader.read()).await {
             Ok(v) => v,
-            Err(_) => break,
+            Err(e) => {
+                // a dropped connection mid-stream used to just break silently
+                // here and return Ok(()), same dead-end as an unhandled
+                // non-2xx response above - the caller never learns anything
+                // went wrong
+                on_error(format!("stream read failed: {e:?}"));
+                break;
+            }
         };
         let done = js_sys::Reflect::get(&chunk_value, &JsValue::from_str("done"))
             .map_err(|e| format!("{e:?}"))?
