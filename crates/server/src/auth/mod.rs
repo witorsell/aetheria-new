@@ -65,17 +65,29 @@ pub async fn login(
     Ok((jar.add(cookie), StatusCode::OK))
 }
 
+// a fixed, lazily-computed hash to verify against when the username doesn't
+// exist, so that path pays the same argon2 cost as a real wrong-password
+// failure instead of returning instantly - otherwise the response-time gap
+// lets an attacker enumerate valid usernames without ever guessing a password.
+fn dummy_password_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| hash_password("this password is never checked against a real user"))
+}
+
 async fn try_login(state: &AppState, req: &LoginRequest) -> Result<crate::models::user::User, StatusCode> {
     let user = crate::models::user::find_by_username(&state.db.read_pool, &req.username)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "failed to look up user by username");
             StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or_else(|| {
-            tracing::info!("User not found in DB for username: {}", req.username);
-            StatusCode::UNAUTHORIZED
         })?;
+
+    let Some(user) = user else {
+        tracing::info!("User not found in DB for username: {}", req.username);
+        let dummy = PasswordHash::new(dummy_password_hash()).expect("dummy hash is always valid PHC format");
+        let _ = Argon2::default().verify_password(req.password.as_bytes(), &dummy);
+        return Err(StatusCode::UNAUTHORIZED);
+    };
 
     Argon2::default()
         .verify_password(req.password.as_bytes(), &PasswordHash::new(&user.password_hash).map_err(|e| {
