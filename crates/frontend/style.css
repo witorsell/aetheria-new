@@ -1672,36 +1672,51 @@ p.muted {
 .reduced-motion .mascot-corner {
   transition: none !important;
 }
+.mascot-corner-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: transparent;
+}
 .mascot-corner {
   position: fixed;
   /* images are 480x800; at this width the rendered height is ~113px, so
-     -99px leaves a ~14px sliver peeking up at rest instead of the ~70px
-     that used to sit permanently over the chat input */
-  bottom: -99px;
+     -15px reveals her face and hands at rest */
+  bottom: -15px;
   right: 2rem;
   width: 68px;
   cursor: pointer;
-  transition: bottom 400ms ease;
+  transition: bottom 400ms ease, width 400ms ease;
   z-index: 40;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.mascot-corner.visible {
-  bottom: -16px;
+.mascot-corner.clicked {
+  /* peek-clicked.png is a full-body pose, much smaller within its canvas
+     than the close-up peek.png, so it needs its own bigger, grounded box
+     instead of sharing the peek sliver's size/offset */
+  width: 140px;
+  bottom: -12px;
 }
-.mascot-corner:hover {
-  bottom: 0px;
+@media (hover: hover) {
+  /* scoped to real pointer devices: on touch, tapping leaves an element
+     "stuck" in :hover until something else is tapped, which fought with
+     tap-to-close settling her back to the resting bottom offset */
+  .mascot-corner:hover {
+    bottom: 0px;
+  }
 }
 @media (max-width: 768px) {
   .mascot-corner {
     width: 56px;
     right: 0.75rem;
-    /* rendered height ~93px; clear of the fixed chat-input-bar at rest so
-       the resting sliver can't land on the send button */
-    bottom: -85px;
+    bottom: -22px;
   }
-  .mascot-corner.visible,
-  .mascot-corner:hover {
-    /* lifts above the fixed chat-input-bar instead of down onto it */
-    bottom: 4.5rem;
+  .mascot-corner.clicked {
+    width: 110px;
+    bottom: -9px;
   }
 }
 .mascot-chat-corner {
