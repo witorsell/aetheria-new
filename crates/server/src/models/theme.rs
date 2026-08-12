@@ -2,12 +2,16 @@ use serde::{Deserialize, Serialize};
 
 fn d_color_bg() -> String { "#0a0a0c".into() }
 fn d_color_surface() -> String { "transparent".into() }
+fn d_color_surface_hover() -> String { "rgba(255, 255, 255, 0.04)".into() }
 fn d_color_border() -> String { "rgba(255, 255, 255, 0.08)".into() }
 fn d_color_accent() -> String { "#7c5cff".into() }
 fn d_color_accent_2() -> String { "#ff9ecf".into() }
+fn d_color_accent_hover() -> String { "#9b80ff".into() }
 fn d_color_text() -> String { "#ffffff".into() }
 fn d_color_text_muted() -> String { "#a09aad".into() }
+fn d_color_text_heading() -> String { "#ffffff".into() }
 fn d_color_error() -> String { "#f43f5e".into() }
+fn d_color_error_bg() -> String { "rgba(244, 63, 94, 0.05)".into() }
 fn d_font_heading() -> String { "'Quicksand', system-ui, sans-serif".into() }
 fn d_font_body() -> String { "'Inter', system-ui, sans-serif".into() }
 fn d_font_scale() -> f64 { 1.0 }
@@ -34,18 +38,26 @@ pub struct ThemeTokens {
     pub color_bg: String,
     #[serde(default = "d_color_surface")]
     pub color_surface: String,
+    #[serde(default = "d_color_surface_hover")]
+    pub color_surface_hover: String,
     #[serde(default = "d_color_border")]
     pub color_border: String,
     #[serde(default = "d_color_accent")]
     pub color_accent: String,
     #[serde(default = "d_color_accent_2")]
     pub color_accent_2: String,
+    #[serde(default = "d_color_accent_hover")]
+    pub color_accent_hover: String,
     #[serde(default = "d_color_text")]
     pub color_text: String,
     #[serde(default = "d_color_text_muted")]
     pub color_text_muted: String,
+    #[serde(default = "d_color_text_heading")]
+    pub color_text_heading: String,
     #[serde(default = "d_color_error")]
     pub color_error: String,
+    #[serde(default = "d_color_error_bg")]
+    pub color_error_bg: String,
     #[serde(default = "d_font_heading")]
     pub font_heading: String,
     #[serde(default = "d_font_body")]
@@ -97,12 +109,16 @@ pub fn light_theme_tokens() -> ThemeTokens {
     ThemeTokens {
         color_bg: "#faf8fc".into(),
         color_surface: "transparent".into(),
+        color_surface_hover: "rgba(20, 10, 30, 0.04)".into(),
         color_border: "rgba(20, 10, 30, 0.08)".into(),
         color_accent: "#7c5cff".into(),
         color_accent_2: "#e0409f".into(),
+        color_accent_hover: "#6a4de6".into(),
         color_text: "#1a1420".into(),
         color_text_muted: "#6b6376".into(),
+        color_text_heading: "#1a1420".into(),
         color_error: "#dc2626".into(),
+        color_error_bg: "rgba(220, 38, 38, 0.08)".into(),
         ..ThemeTokens::default()
     }
 }
@@ -131,11 +147,13 @@ fn st_chat_display(n: i64) -> String {
 }
 
 /// translates a raw SillyTavern theme JSON export onto aetheria's token
-/// set. fields aetheria has that ST doesn't (mascot_*, radius_*) are left at
-/// the default theme's values. returns a warning if `custom_css` contained
-/// an `@import` (a tracking/XSS vector ST itself warns about on import), with
-/// the `@import` statement stripped from the stored value.
-pub fn st_to_aetheria(raw: &serde_json::Value) -> (ThemeTokens, Option<String>) {
+/// set. fields aetheria has that ST doesn't (mascot_*, radius_*, the new
+/// color_text_heading/color_surface_hover/color_accent_hover/color_error_bg)
+/// are left at the default theme's values. `custom_css` is carried across
+/// unmodified here. stripping `@import` out of it is the caller's job
+/// (`routes::themes::validate`), which runs uniformly for every path a theme
+/// can be created or updated through, not just this one.
+pub fn st_to_aetheria(raw: &serde_json::Value) -> ThemeTokens {
     let mut tokens = default_theme_tokens();
     let s = |key: &str| raw.get(key).and_then(|v| v.as_str()).map(|s| s.to_string());
     let f = |key: &str| raw.get(key).and_then(|v| v.as_f64());
@@ -151,19 +169,9 @@ pub fn st_to_aetheria(raw: &serde_json::Value) -> (ThemeTokens, Option<String>) 
     if let Some(v) = f("chat_width") { tokens.chat_width = v; }
     if let Some(v) = i("avatar_style") { tokens.avatar_style = st_avatar_style(v); }
     if let Some(v) = i("chat_display") { tokens.chat_display = st_chat_display(v); }
+    if let Some(v) = s("custom_css") { tokens.custom_css = v; }
 
-    let mut warning = None;
-    if let Some(css) = s("custom_css") {
-        if css.contains("@import") {
-            let re = regex::Regex::new(r"@import[^;]*;").unwrap();
-            tokens.custom_css = re.replace_all(&css, "").trim().to_string();
-            warning = Some("The imported theme's custom CSS contained an @import rule, which was removed. @import can be used to load external stylesheets that track or fingerprint you.".to_string());
-        } else {
-            tokens.custom_css = css;
-        }
-    }
-
-    (tokens, warning)
+    tokens
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -327,25 +335,25 @@ mod tests {
             "chat_width": 50,
             "custom_css": ""
         });
-        let (tokens, warning) = st_to_aetheria(&raw);
+        let tokens = st_to_aetheria(&raw);
         assert_eq!(tokens.color_text, "rgba(235,235,235,1)");
         assert_eq!(tokens.color_border, "rgba(80,80,80,0.89)");
         assert_eq!(tokens.blur_strength, 3.0);
         assert_eq!(tokens.avatar_style, "rounded"); // ST's avatar_style 2
         assert_eq!(tokens.chat_display, "bubble");  // ST's chat_display 1
-        assert!(warning.is_none());
         // fields aetheria has that ST doesn't fall back to the default theme
         assert_eq!(tokens.mascot_accent, default_theme_tokens().mascot_accent);
+        assert_eq!(tokens.color_text_heading, default_theme_tokens().color_text_heading);
     }
 
     #[test]
-    fn st_import_strips_and_warns_on_at_import_in_custom_css() {
+    fn st_import_carries_custom_css_through_unstripped() {
+        // @import stripping happens once, uniformly, in routes::themes::validate -
+        // not here. this just confirms the raw css makes it onto the tokens.
         let raw = serde_json::json!({
             "custom_css": "@import url('https://evil.example/track.css'); .foo { color: red; }"
         });
-        let (tokens, warning) = st_to_aetheria(&raw);
-        assert!(!tokens.custom_css.contains("@import"));
-        assert!(tokens.custom_css.contains(".foo"));
-        assert!(warning.is_some());
+        let tokens = st_to_aetheria(&raw);
+        assert_eq!(tokens.custom_css, "@import url('https://evil.example/track.css'); .foo { color: red; }");
     }
 }
