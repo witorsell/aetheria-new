@@ -166,7 +166,7 @@ impl Writer {
         self.dispatch(move |conn| Box::pin(async move {
             let mut tx = conn.begin().await?;
 
-            let row = sqlx::query("SELECT parent_id FROM messages WHERE id = ? AND deleted = 0 AND user_id = ?")
+            let row = sqlx::query("SELECT parent_id, chat_id, created_at FROM messages WHERE id = ? AND deleted = 0 AND user_id = ?")
                 .bind(&id)
                 .bind(user_id)
                 .fetch_optional(&mut *tx)
@@ -175,6 +175,10 @@ impl Writer {
                 return Ok(false);
             };
             let parent_id: Option<String> = row.get("parent_id");
+            let chat_id: String = row.get("chat_id");
+            let created_at: i64 = row.get("created_at");
+
+            invalidate_summary_if_already_folded_in(&mut tx, user_id, &chat_id, created_at).await?;
 
             sqlx::query("UPDATE messages SET parent_id = ? WHERE parent_id = ?")
                 .bind(&parent_id)
@@ -224,7 +228,7 @@ impl Writer {
         self.dispatch(move |conn| Box::pin(async move {
             let mut tx = conn.begin().await?;
 
-            let row = sqlx::query("SELECT parent_id FROM messages WHERE id = ? AND user_id = ?")
+            let row = sqlx::query("SELECT parent_id, chat_id, created_at FROM messages WHERE id = ? AND user_id = ?")
                 .bind(&id)
                 .bind(user_id)
                 .fetch_optional(&mut *tx)
@@ -233,6 +237,10 @@ impl Writer {
                 return Ok(false);
             };
             let parent_id: Option<String> = row.get("parent_id");
+            let chat_id: String = row.get("chat_id");
+            let created_at: i64 = row.get("created_at");
+
+            invalidate_summary_if_already_folded_in(&mut tx, user_id, &chat_id, created_at).await?;
 
             sqlx::query("UPDATE messages SET parent_id = ? WHERE parent_id = ?")
                 .bind(&parent_id)
@@ -252,4 +260,38 @@ impl Writer {
             Ok(deleted)
         })).await
     }
+}
+
+/// a chat's memory_summary is one running narrative text with no way to
+/// surgically remove a single message's contribution once folded in - if
+/// the message being deleted was created at or before whatever
+/// memory_summary_message_id currently points to, it's already baked into
+/// that narrative (soft-deleting or editing it afterward doesn't touch the
+/// summary text), so the only correct move is to invalidate the whole
+/// summary and let the next pass rebuild it from what's actually still
+/// there. otherwise deleted content - including things like a refusal -
+/// keeps getting fed back into every future generation forever.
+async fn invalidate_summary_if_already_folded_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: i64,
+    chat_id: &str,
+    deleted_message_created_at: i64,
+) -> sqlx::Result<()> {
+    let cursor_created_at: Option<i64> = sqlx::query_scalar(
+        "SELECT m.created_at FROM chats c JOIN messages m ON m.id = c.memory_summary_message_id \
+         WHERE c.id = ? AND c.user_id = ?",
+    )
+    .bind(chat_id)
+    .bind(user_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    if cursor_created_at.is_some_and(|cursor_ts| deleted_message_created_at <= cursor_ts) {
+        sqlx::query("UPDATE chats SET memory_summary = NULL, memory_summary_message_id = NULL WHERE id = ? AND user_id = ?")
+            .bind(chat_id)
+            .bind(user_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
 }
