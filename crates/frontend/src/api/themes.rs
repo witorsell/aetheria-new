@@ -28,6 +28,39 @@ pub struct ThemeTokens {
     pub custom_css: String,
 }
 
+// mirrors crates/server/src/models/theme.rs's default_theme_tokens(); the frontend
+// can't share Rust types with the backend, so these two lists of literals have to be
+// kept in sync by hand (same situation api/presets.rs already lives with)
+impl Default for ThemeTokens {
+    fn default() -> Self {
+        ThemeTokens {
+            color_bg: "#0a0a0c".into(),
+            color_surface: "transparent".into(),
+            color_border: "rgba(255, 255, 255, 0.08)".into(),
+            color_accent: "#7c5cff".into(),
+            color_accent_2: "#ff9ecf".into(),
+            color_text: "#ffffff".into(),
+            color_text_muted: "#a09aad".into(),
+            color_error: "#f43f5e".into(),
+            font_heading: "'Quicksand', system-ui, sans-serif".into(),
+            font_body: "'Inter', system-ui, sans-serif".into(),
+            font_scale: 1.0,
+            radius_sm: "8px".into(),
+            radius_md: "14px".into(),
+            radius_lg: "22px".into(),
+            avatar_style: "rounded".into(),
+            blur_strength: 0.0,
+            shadow_strength: 1.0,
+            reduced_motion: false,
+            chat_width: 50.0,
+            chat_display: "bubble".into(),
+            mascot_enabled: true,
+            mascot_accent: "#c084fc".into(),
+            custom_css: String::new(),
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct ThemeListItem {
     pub id: String,

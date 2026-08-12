@@ -11,6 +11,7 @@ use crate::pages::presets::{PresetsPage, PresetEditorPage};
 use crate::pages::landing::LandingPage;
 use crate::pages::terms::TermsPage;
 use crate::pages::privacy::PrivacyPage;
+use crate::theme::ThemeStore;
 use leptos::prelude::*;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::{ParamSegment, StaticSegment};
@@ -31,7 +32,20 @@ pub fn NotFoundPage() -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     let settings = LocalResource::new(|| async move { crate::api::get_settings().await });
-    
+
+    let active_theme = LocalResource::new(|| async move { crate::api::get_active_theme().await.unwrap_or_default() });
+    let theme_tokens = RwSignal::new(crate::api::ThemeTokens::default());
+    provide_context(ThemeStore(theme_tokens));
+
+    Effect::new(move |_| {
+        if let Some(tokens) = active_theme.get() {
+            theme_tokens.set(tokens.clone());
+        }
+    });
+    Effect::new(move |_| {
+        crate::theme::apply_tokens_to_root(&theme_tokens.get());
+    });
+
     view! {
         <Suspense fallback=|| view! { <div style="display: flex; height: 100vh; background: #0b0b0e;"></div> }>
             {move || match settings.get() {
