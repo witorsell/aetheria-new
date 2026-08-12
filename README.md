@@ -25,6 +25,7 @@ Switched to SillyTavern after seeing all the positive opinions on it, but it was
 So here we are.
 
 ## Recent updates
+- Full theme system: SillyTavern-style token editor with instant live preview, import/export (including direct SillyTavern theme file import), plus a redesigned default look and a mascot (Aug 12)
 - Group chats with multiple activation strategies (List, Natural) and per-character talkativeness (Aug 6-7)
 - Character card import/export as SillyTavern-compatible PNG cards (Aug 5-6)
 - Character alternate greetings, tags, and folders (Aug 5-6)
@@ -78,6 +79,12 @@ So here we are.
 - Completion presets: marker prompts (`worldInfoBefore`, `charDescription`, `chatHistory`, …) are resolved from live content at assembly time and ordered by the preset's `prompt_order` list, which honors enabled toggles plus injection depth and injection position
 - Real GPT-2 BPE tokenizer for accurate context-window management
 - Full sampling controls (temperature, top_p, top_k, frequency/presence penalty, max response length)
+
+**Theming**
+- Full custom theme system: colors, typography, shape, effects, and mascot visibility, all stored as a flat token set and applied live as CSS custom properties, no reload needed
+- Built-in default and light themes, plus unlimited custom themes per account, each with its own live-preview editor (every color/slider/checkbox edit applies instantly, nothing is written until you hit save)
+- Theme import/export, including direct SillyTavern UI theme JSON import, auto-mapped onto Aetheria's token set (an `@import` in imported `custom_css` is stripped with a warning, since it's a tracking/XSS vector)
+- Aeth, a small mascot who reacts to what's actually happening: a thinking pose while a reply streams, a startled pose on a failed generation, an empty-state pose when your character list is empty, and a corner easter egg that peeks up on hover or click
 
 ## Architecture
 ```
