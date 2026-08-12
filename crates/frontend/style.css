@@ -1669,20 +1669,40 @@ p.muted {
 .reduced-motion .mascot {
   transition: none !important;
 }
+.reduced-motion .mascot-corner {
+  transition: none !important;
+}
 .mascot-corner {
   position: fixed;
-  bottom: -80px;
+  /* images are 480x800; at this width the rendered height is ~113px, so
+     -99px leaves a ~14px sliver peeking up at rest instead of the ~70px
+     that used to sit permanently over the chat input */
+  bottom: -99px;
   right: 2rem;
-  width: 90px;
+  width: 68px;
   cursor: pointer;
   transition: bottom 400ms ease;
   z-index: 40;
 }
 .mascot-corner.visible {
-  bottom: -20px;
+  bottom: -16px;
 }
 .mascot-corner:hover {
   bottom: 0px;
+}
+@media (max-width: 768px) {
+  .mascot-corner {
+    width: 56px;
+    right: 0.75rem;
+    /* rendered height ~93px; clear of the fixed chat-input-bar at rest so
+       the resting sliver can't land on the send button */
+    bottom: -85px;
+  }
+  .mascot-corner.visible,
+  .mascot-corner:hover {
+    /* lifts above the fixed chat-input-bar instead of down onto it */
+    bottom: 4.5rem;
+  }
 }
 .mascot-chat-corner {
   width: 64px;
