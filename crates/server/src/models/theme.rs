@@ -205,6 +205,8 @@ mod tests {
     #[tokio::test]
     async fn list_and_get_are_scoped_to_user() {
         let db = crate::db::connect(":memory:").await;
+        db.writer.create_user("user2".into(), "hash".into()).await.unwrap();
+
         db.writer
             .create_theme(1, "Mine".into(), default_theme_tokens())
             .await
@@ -220,5 +222,40 @@ mod tests {
 
         let missing = get(&db.read_pool, 2, &mine[0].id).await.unwrap();
         assert!(missing.is_none(), "a theme owned by user 1 must not be readable by user 2");
+    }
+
+    #[tokio::test]
+    async fn create_update_delete_round_trip() {
+        let db = crate::db::connect(":memory:").await;
+        db.writer.create_user("user2".into(), "hash".into()).await.unwrap();
+
+        let created = db.writer.create_theme(1, "My Theme".into(), default_theme_tokens()).await.unwrap();
+        assert_eq!(created.name, "My Theme");
+        assert_eq!(created.tokens.color_accent, default_theme_tokens().color_accent);
+
+        let mut edited_tokens = created.tokens.clone();
+        edited_tokens.color_accent = "#00ff00".into();
+        let updated = db.writer.update_theme(1, created.id.clone(), "Renamed".into(), edited_tokens).await.unwrap();
+        assert!(updated);
+
+        let fetched = get(&db.read_pool, 1, &created.id).await.unwrap().unwrap();
+        assert_eq!(fetched.name, "Renamed");
+        assert_eq!(fetched.tokens.color_accent, "#00ff00");
+
+        let deleted = db.writer.delete_theme(1, created.id.clone()).await.unwrap();
+        assert!(deleted);
+        assert!(get(&db.read_pool, 1, &created.id).await.unwrap().is_none());
+
+        // deleting/updating someone else's theme is a no-op, not an error
+        let other = db.writer.create_theme(2, "Not Yours".into(), default_theme_tokens()).await.unwrap();
+        assert!(!db.writer.delete_theme(1, other.id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_and_get_active_theme() {
+        let db = crate::db::connect(":memory:").await;
+        assert_eq!(db.writer.get_active_theme_id(1).await.unwrap(), "default");
+        db.writer.set_active_theme(1, "light".into()).await.unwrap();
+        assert_eq!(db.writer.get_active_theme_id(1).await.unwrap(), "light");
     }
 }

@@ -71,4 +71,5 @@ mod presets;
 mod regex_scripts;
 mod sessions;
 mod settings;
+mod themes;
 mod users;
