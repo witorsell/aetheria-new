@@ -123,6 +123,20 @@ pub fn build_router(state: AppState) -> Router {
 
     let protected_v1 = protected.clone();
 
+    // avatar filenames are predictable (avatar_user_{id}.{ext},
+    // avatar_{character_id}.{ext}), so this can't just sit outside the
+    // protected router the way a plain static-file mount normally would -
+    // anyone who knows or guesses an id could view someone else's avatar
+    // without ever logging in. gated by the same session-cookie middleware
+    // as everything else, which a same-origin <img src> still sends fine.
+    let uploads = Router::new()
+        .nest_service("/uploads", ServeDir::new(base_path().join("crates/server/uploads")))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::middleware::require_auth,
+        ))
+        .with_state(state.clone());
+
     let public_routes = Router::new()
         .route("/health", get(health))
         .route("/api/health", get(health))
@@ -137,7 +151,7 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .merge(public_routes)
-        .nest_service("/uploads", ServeDir::new(base_path().join("crates/server/uploads")))
+        .merge(uploads)
         .merge(protected)
         .nest("/api/v1", protected_v1)
         .layer(DefaultBodyLimit::max(get_max_upload_bytes()))
