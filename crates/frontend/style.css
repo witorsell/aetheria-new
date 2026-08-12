@@ -1724,6 +1724,22 @@ p.muted {
   position: absolute;
   bottom: 4.5rem;
   right: 1rem;
+  /* purely decorative, no click handler - never let her sit in front of
+     and block a tap on the message-action buttons she floats near */
+  pointer-events: none;
+}
+@media (max-width: 768px) {
+  .mascot-chat-corner {
+    /* floating above the message list kept landing on top of whichever
+       message/buttons happened to scroll underneath - dock her inside the
+       input bar itself instead, between the field and the send button, so
+       she's confined to the bar's own box and can never overlap anything
+       above it no matter what's on screen */
+    position: static;
+    width: auto;
+    height: 36px;
+    align-self: center;
+  }
 }
 .mascot-empty-state {
   display: flex;
