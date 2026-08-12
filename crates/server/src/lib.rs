@@ -91,8 +91,8 @@ mod tests {
 
         bootstrap_user(&db, "testuser", "test-pass-1234").await;
 
-        let testuser = models::user::find_by_username(&db.read_pool, "testuser").await.unwrap();
-        assert!(testuser.is_some(), "bootstrap should have claimed the placeholder row as 'testuser'");
+        let renamed = models::user::find_by_username(&db.read_pool, "testuser").await.unwrap();
+        assert!(renamed.is_some(), "bootstrap should have claimed the placeholder row as 'testuser'");
 
         let stale_admin = models::user::find_by_username(&db.read_pool, "admin").await.unwrap();
         assert!(stale_admin.is_none(), "the placeholder 'admin' row should have been renamed, not left behind alongside the real user");
@@ -110,8 +110,8 @@ mod tests {
         // touch the now-real account
         bootstrap_user(&db, "someone-else", "different-password").await;
 
-        let testuser = models::user::find_by_username(&db.read_pool, "testuser").await.unwrap();
-        assert!(testuser.is_some(), "the real user from the first bootstrap must survive a second bootstrap call");
+        let bootstrapped = models::user::find_by_username(&db.read_pool, "testuser").await.unwrap();
+        assert!(bootstrapped.is_some(), "the real user from the first bootstrap must survive a second bootstrap call");
         let someone_else = models::user::find_by_username(&db.read_pool, "someone-else").await.unwrap();
         assert!(someone_else.is_none(), "a second bootstrap call must not create or rename into a new account");
     }
