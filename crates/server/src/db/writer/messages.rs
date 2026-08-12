@@ -136,15 +136,34 @@ impl Writer {
 
     pub async fn update_message_content(&self, user_id: i64, id: String, content: String) -> sqlx::Result<bool> {
         self.dispatch(move |conn| Box::pin(async move {
-            sqlx::query(
+            let mut tx = conn.begin().await?;
+
+            let row = sqlx::query("SELECT chat_id, created_at FROM messages WHERE id = ? AND deleted = 0 AND user_id = ?")
+                .bind(&id)
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+            if let Some(row) = &row {
+                let chat_id: String = row.get("chat_id");
+                let created_at: i64 = row.get("created_at");
+                // same reasoning as delete: an edit changes what was actually
+                // folded into the summary, not just what's still visible
+                invalidate_summary_if_already_folded_in(&mut tx, user_id, &chat_id, created_at).await?;
+            }
+
+            let updated = sqlx::query(
                 "UPDATE messages SET content = ? WHERE id = ? AND deleted = 0 AND user_id = ?",
             )
             .bind(&content)
             .bind(&id)
             .bind(user_id)
-            .execute(&mut *conn)
-            .await
-            .map(|r| r.rows_affected() > 0)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+            > 0;
+
+            tx.commit().await?;
+            Ok(updated)
         })).await
     }
 
