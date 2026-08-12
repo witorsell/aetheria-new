@@ -76,6 +76,13 @@ pub struct AppState {
     pub login_attempts: Cache<String, u32>,
     /// rate limiter token buckets for text generation endpoints per user
     pub generation_rate_limiter: Cache<i64, std::sync::Arc<tokio::sync::Mutex<TokenBucket>>>,
+    /// serializes maybe_update_chat_summary passes per chat_id. it's spawned
+    /// fire-and-forget after every reply, and without this two passes landing
+    /// close together (fast group chat members, a quick regenerate) would
+    /// both read the same cursor/summary before either writes - whichever
+    /// LLM call finishes last wins and silently discards or regresses the
+    /// other pass's work
+    pub summary_locks: Cache<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
     pub registration_enabled: bool,
     /// idle timeout and absolute max age for sessions
     pub session_idle_timeout: Duration,
@@ -133,6 +140,10 @@ impl AppState {
                 .max_capacity(10_000)
                 .time_to_idle(Duration::from_secs(3600))
                 .build(),
+            summary_locks: Cache::builder()
+                .max_capacity(10_000)
+                .time_to_idle(Duration::from_secs(3600))
+                .build(),
             registration_enabled,
             session_idle_timeout,
             session_absolute_max_age,
@@ -162,6 +173,18 @@ impl AppState {
         } else {
             Err(crate::error::ApiError::too_many_requests("Rate limit exceeded for generation endpoint"))
         }
+    }
+
+    /// the lock guarding a chat's memory-summary read-summarize-write
+    /// sequence, created on first use. uses moka's get_with (single-flight)
+    /// rather than a plain get-then-insert: two calls racing on the same
+    /// missing chat_id under a plain get/insert could each create their own
+    /// Arc<Mutex<()>>, and locking two different mutexes wouldn't serialize
+    /// anything - the exact race this lock exists to close.
+    pub async fn chat_summary_lock(&self, chat_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        self.summary_locks
+            .get_with(chat_id.to_string(), async { std::sync::Arc::new(tokio::sync::Mutex::new(())) })
+            .await
     }
 }
 

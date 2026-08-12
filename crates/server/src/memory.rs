@@ -19,6 +19,10 @@ fn format_entry(name: &str, content: &str) -> String {
 /// swallowed since this is a background quality-of-life feature, not part of
 /// the reply the user is waiting on.
 pub async fn maybe_update_chat_summary(state: &AppState, user_id: i64, chat_id: &str) {
+    // serializes overlapping passes for this chat - see AppState::chat_summary_lock
+    let lock = state.chat_summary_lock(chat_id).await;
+    let _guard = lock.lock().await;
+
     let Some(chat) = crate::models::chat::get(&state.db.read_pool, user_id, chat_id).await.ok().flatten() else {
         return;
     };
