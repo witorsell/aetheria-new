@@ -6,6 +6,7 @@ mod lorebooks;
 mod presets;
 mod regex_scripts;
 mod settings;
+mod themes;
 
 pub use characters::*;
 pub use chats::*;
@@ -15,3 +16,4 @@ pub use lorebooks::*;
 pub use presets::*;
 pub use regex_scripts::*;
 pub use settings::*;
+pub use themes::*;
