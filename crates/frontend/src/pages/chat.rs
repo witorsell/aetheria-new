@@ -258,8 +258,12 @@ pub fn ChatPage() -> impl IntoView {
     let (did_initial_scroll, set_did_initial_scroll) = signal(false);
 
     Effect::new(move |_| {
-        active_branch.get();
-        if !did_initial_scroll.get_untracked() {
+        let branch = active_branch.get();
+        // this fires on mount before the chat has loaded, when active_branch
+        // is still empty - waiting for a real branch keeps did_initial_scroll
+        // from being spent on that empty pass, which used to leave nothing
+        // to scroll to and never fire again once the real messages arrived
+        if !did_initial_scroll.get_untracked() && !branch.is_empty() {
             leptos::task::spawn_local(async move {
                 gloo_timers::future::TimeoutFuture::new(100).await;
                 if let Some(window) = web_sys::window() {
@@ -425,7 +429,12 @@ pub fn ChatPage() -> impl IntoView {
                 set_pending_user_text.set(None);
                 set_send_parent_id.set(None);
                 set_regenerating_msg_id.set(None);
-                set_selected_children.set(HashMap::new());
+                // the new message is the sole child of whatever branch was
+                // active, so it's already what walk_active_branch defaults to
+                // there - clearing the whole map used to also wipe every
+                // earlier fork's selection (e.g. original vs. regenerated),
+                // silently rerouting the view through the newest sibling at
+                // each one instead of the branch actually being replied to
                 fetch_tree();
             });
         }
@@ -754,9 +763,42 @@ pub fn ChatPage() -> impl IntoView {
 
     let select_sibling = move |parent_id: String, child_id: String| {
         let cid = chat_id.get_untracked();
+
+        let mut was_at_bottom = false;
+        if let Some(window) = web_sys::window() {
+            if let Some(doc) = window.document() {
+                if let Ok(Some(el)) = doc.query_selector(".main-content") {
+                    let scroll_top = el.scroll_top();
+                    let client_height = el.client_height();
+                    let scroll_height = el.scroll_height();
+                    if scroll_height - (scroll_top + client_height) < 150 {
+                        was_at_bottom = true;
+                    }
+                }
+            }
+        }
+
         set_selected_children.update(|map| {
             map.insert(parent_id.clone(), child_id.clone());
         });
+
+        // a sibling can be a different length than the one it replaced;
+        // if the view was pinned to the bottom before switching, keep it
+        // pinned instead of leaving the scroll position stuck wherever it
+        // happened to land relative to the top of the new content
+        if was_at_bottom {
+            leptos::task::spawn_local(async move {
+                gloo_timers::future::TimeoutFuture::new(50).await;
+                if let Some(window) = web_sys::window() {
+                    if let Some(doc) = window.document() {
+                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
+                            el.set_scroll_top(el.scroll_height());
+                        }
+                    }
+                }
+            });
+        }
+
         spawn_local(async move {
             if let Ok(extra) = crate::api::subtree(&cid, &child_id, 50).await {
                 set_tree.update(|t| {
