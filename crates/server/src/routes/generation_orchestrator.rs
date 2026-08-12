@@ -235,6 +235,12 @@ pub(crate) async fn load_group_roster(
 // streams one reply per id in activated_ids, in order, each seeing the
 // previous ones already in history. generate computes activated_ids via
 // resolve_activation; regenerate just passes the one member being rerolled
+// the generation loop (including every DB save) runs inside a spawned task
+// instead of the stream generator itself, so it runs to completion even if
+// the client disconnects mid-reply and axum stops polling the SSE body -
+// otherwise a dropped connection loses whatever reply was already paid for
+// to the provider, along with the save that would have recorded it. the
+// stream returned here is just a subscriber over a channel the task feeds.
 pub(crate) fn run_group_generation(
     state: AppState, user_id: i64, chat_id: String,
     chat: crate::models::chat::Chat,
@@ -245,7 +251,9 @@ pub(crate) fn run_group_generation(
     characters_by_id: HashMap<String, crate::models::character::Character>,
     all_names: HashMap<String, String>,
 ) -> impl futures_util::Stream<Item = Result<Event, Infallible>> {
-    async_stream::stream! {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+
+    tokio::spawn(async move {
         for character_id in activated_ids {
             let Some(character) = characters_by_id.get(&character_id) else { continue };
             let other_names: Vec<String> = all_names.iter()
@@ -254,9 +262,9 @@ pub(crate) fn run_group_generation(
                 .collect();
             let nudge = format!("[Write the next reply only as {}.]", character.name);
 
-            yield Ok(Event::default().event("member").data(
+            let _ = tx.send(Ok(Event::default().event("member").data(
                 serde_json::json!({ "character_id": character_id, "name": character.name }).to_string()
-            ));
+            ))).await;
 
             let prepared = match assemble_generation(
                 &state, user_id, &chat, character, &history, &new_user_message, false, false,
@@ -264,7 +272,7 @@ pub(crate) fn run_group_generation(
             ).await {
                 Ok(p) => p,
                 Err(status) => {
-                    yield Ok(Event::default().event("error").data(format!("prompt assembly failed: {}", status.code)));
+                    let _ = tx.send(Ok(Event::default().event("error").data(format!("prompt assembly failed: {}", status.code)))).await;
                     continue;
                 }
             };
@@ -278,10 +286,10 @@ pub(crate) fn run_group_generation(
                 match item {
                     Ok(delta) => {
                         accumulated.push_str(&delta);
-                        yield Ok(Event::default().data(delta));
+                        let _ = tx.send(Ok(Event::default().data(delta))).await;
                     }
-                    Err(ProviderError::Request(e)) => yield Ok(Event::default().event("error").data(e.to_string())),
-                    Err(ProviderError::Status(code, body)) => yield Ok(Event::default().event("error").data(format!("{code}: {body}"))),
+                    Err(ProviderError::Request(e)) => { let _ = tx.send(Ok(Event::default().event("error").data(e.to_string()))).await; }
+                    Err(ProviderError::Status(code, body)) => { let _ = tx.send(Ok(Event::default().event("error").data(format!("{code}: {body}")))).await; }
                 }
             }
             if accumulated.is_empty() {
@@ -308,7 +316,7 @@ pub(crate) fn run_group_generation(
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "failed to save assistant message for {}", character_id);
-                    yield Ok(Event::default().event("error").data(format!("failed to save message: {}", e)));
+                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
                 }
             }
         }
@@ -320,8 +328,10 @@ pub(crate) fn run_group_generation(
             crate::vector_memory::maybe_index_chat(&state_for_memory, user_id, &chat_id_for_memory).await;
         });
 
-        yield Ok(Event::default().event("done").data(""));
-    }
+        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+    });
+
+    futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) })
 }
 
 pub(crate) async fn run_generation(
@@ -393,16 +403,23 @@ pub(crate) async fn run_generation(
     let raw_prompt = prepared.raw_prompt;
     let prompt_tokens = prepared.prompt_tokens;
     let context_limit = prepared.context_limit;
-    let accumulated = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
-    let accumulated_for_stream = accumulated.clone();
     let parent_id_for_reply = last_message.id.clone();
 
-    let sse_stream = provider_stream.then(move |item| {
-        let accumulated = accumulated_for_stream.clone();
-        async move {
-            match item {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+
+    let chat_id_for_finish = chat_id.clone();
+    let state_for_memory = state.clone();
+    let chat_id_for_memory = chat_id.clone();
+    // runs to completion in its own task regardless of whether the client
+    // is still reading the SSE response - see the comment on
+    // run_group_generation, this is the same fix for the 1:1 case
+    tokio::spawn(async move {
+        let mut provider_stream = provider_stream;
+        let mut accumulated = String::new();
+        while let Some(item) = provider_stream.next().await {
+            let event = match item {
                 Ok(delta) => {
-                    accumulated.lock().await.push_str(&delta);
+                    accumulated.push_str(&delta);
                     Ok(Event::default().data(delta))
                 }
                 Err(ProviderError::Request(e)) => {
@@ -411,20 +428,15 @@ pub(crate) async fn run_generation(
                 Err(ProviderError::Status(code, body)) => {
                     Ok(Event::default().event("error").data(format!("{code}: {body}")))
                 }
-            }
+            };
+            let _ = tx.send(event).await;
         }
-    });
 
-    let chat_id_for_finish = chat_id.clone();
-    let state_for_memory = state.clone();
-    let chat_id_for_memory = chat_id.clone();
-    let finishing_stream = sse_stream.chain(futures_util::stream::once(async move {
-        let final_content = accumulated.lock().await.clone();
-        if !final_content.is_empty() {
+        if !accumulated.is_empty() {
             let save_result = writer
                 .create_assistant_message_with_prompt(user_id, chat_id_for_finish,
                     Some(parent_id_for_reply),
-                    final_content,
+                    accumulated,
                     raw_prompt,
                     prompt_tokens,
                     context_limit,
@@ -432,19 +444,23 @@ pub(crate) async fn run_generation(
                 )
                 .await;
             match save_result {
-                Ok(_) => {}
+                Ok(_) => {
+                    tokio::spawn(async move {
+                        crate::memory::maybe_update_chat_summary(&state_for_memory, user_id, &chat_id_for_memory).await;
+                        crate::vector_memory::maybe_index_chat(&state_for_memory, user_id, &chat_id_for_memory).await;
+                    });
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "failed to save assistant message");
-                    return Ok(Event::default().event("error").data(format!("failed to save message: {}", e)));
+                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
+                    return;
                 }
             }
-            tokio::spawn(async move {
-                crate::memory::maybe_update_chat_summary(&state_for_memory, user_id, &chat_id_for_memory).await;
-                crate::vector_memory::maybe_index_chat(&state_for_memory, user_id, &chat_id_for_memory).await;
-            });
         }
-        Ok(Event::default().event("done").data(""))
-    }));
+        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+    });
 
-    Ok(Sse::new(finishing_stream.boxed()).keep_alive(KeepAlive::default()))
+    let event_stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+
+    Ok(Sse::new(event_stream.boxed()).keep_alive(KeepAlive::default()))
 }
