@@ -53,6 +53,7 @@ pub fn App() -> impl IntoView {
                 Some(Ok(_)) => view! {
                     <Router>
                         <crate::components::toast::ToastContainer />
+                        <crate::components::mascot::MascotPeekCorner />
                         <Routes fallback=|| view! { <NotFoundPage /> }>
                             <Route
                                 path=StaticSegment("characters")

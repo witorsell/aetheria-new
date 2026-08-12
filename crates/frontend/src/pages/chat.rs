@@ -241,6 +241,7 @@ pub fn ChatPage() -> impl IntoView {
     let (current_member, set_current_member) = signal(Option::<(String, String)>::None);
     let (group_reply_log, set_group_reply_log) = signal(Vec::<(String, String, String)>::new());
     let (is_generating, set_is_generating) = signal(false);
+    let (stream_error, set_stream_error) = signal(false);
     let (is_self_reply, set_is_self_reply) = signal(false);
     let (more_menu_open, set_more_menu_open) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
@@ -329,6 +330,7 @@ pub fn ChatPage() -> impl IntoView {
             }
             set_draft.set(String::new());
             set_error.set(None);
+            set_stream_error.set(false);
             set_is_generating.set(true);
             set_is_self_reply.set(false);
             set_streaming_reply.set(String::new());
@@ -406,12 +408,14 @@ pub fn ChatPage() -> impl IntoView {
                         if err == crate::api::SESSION_EXPIRED_ERROR {
                             navigate("/login", NavigateOptions::default());
                         } else {
+                            set_stream_error.set(true);
                             set_error.set(Some(err));
                         }
                     },
                 )
                 .await;
                 if let Err(e) = result {
+                    set_stream_error.set(true);
                     set_error.set(Some(e));
                 }
                 set_is_generating.set(false);
@@ -434,6 +438,7 @@ pub fn ChatPage() -> impl IntoView {
                 return;
             }
             set_error.set(None);
+            set_stream_error.set(false);
             set_is_generating.set(true);
             set_is_self_reply.set(false);
             set_streaming_reply.set(String::new());
@@ -529,12 +534,14 @@ pub fn ChatPage() -> impl IntoView {
                         if err == crate::api::SESSION_EXPIRED_ERROR {
                             navigate("/login", NavigateOptions::default());
                         } else {
+                            set_stream_error.set(true);
                             set_error.set(Some(err));
                         }
                     },
                 )
                 .await;
                 if let Err(e) = result {
+                    set_stream_error.set(true);
                     set_error.set(Some(e));
                 }
                 set_is_generating.set(false);
@@ -553,6 +560,7 @@ pub fn ChatPage() -> impl IntoView {
                 return;
             }
             set_error.set(None);
+            set_stream_error.set(false);
             set_is_generating.set(true);
             set_is_self_reply.set(false);
             set_more_menu_open.set(false);
@@ -600,12 +608,14 @@ pub fn ChatPage() -> impl IntoView {
                         if err == crate::api::SESSION_EXPIRED_ERROR {
                             navigate("/login", NavigateOptions::default());
                         } else {
+                            set_stream_error.set(true);
                             set_error.set(Some(err));
                         }
                     },
                 )
                 .await;
                 if let Err(e) = result {
+                    set_stream_error.set(true);
                     set_error.set(Some(e));
                 }
                 set_is_generating.set(false);
@@ -623,6 +633,7 @@ pub fn ChatPage() -> impl IntoView {
                 return;
             }
             set_error.set(None);
+            set_stream_error.set(false);
             set_is_generating.set(true);
             set_is_self_reply.set(true);
             set_more_menu_open.set(false);
@@ -673,12 +684,14 @@ pub fn ChatPage() -> impl IntoView {
                         if err == crate::api::SESSION_EXPIRED_ERROR {
                             navigate("/login", NavigateOptions::default());
                         } else {
+                            set_stream_error.set(true);
                             set_error.set(Some(err));
                         }
                     },
                 )
                 .await;
                 if let Err(e) = result {
+                    set_stream_error.set(true);
                     set_error.set(Some(e));
                 }
                 set_is_generating.set(false);
@@ -1456,6 +1469,14 @@ pub fn ChatPage() -> impl IntoView {
                     placeholder="Type a message..."
                     prop:value=draft
                     on:input=move |ev| set_draft.set(event_target_value(&ev))
+                />
+                <crate::components::mascot::Aeth
+                    state=Signal::derive(move || {
+                        if stream_error.get() { crate::components::mascot::MascotState::Error }
+                        else if is_generating.get() { crate::components::mascot::MascotState::Thinking }
+                        else { crate::components::mascot::MascotState::Idle }
+                    })
+                    class="mascot-chat-corner"
                 />
                 <button class="primary send-btn" type="submit" title="Send" disabled=move || is_generating.get()>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

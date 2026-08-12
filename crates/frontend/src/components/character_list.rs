@@ -40,12 +40,20 @@ pub fn CharacterList() -> impl IntoView {
     view! {
         <div class="sidebar-characters">
             {move || {
-                characters
-                    .get()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|character: Character| view! { <CharacterListItem character=character forbid_media=forbid_media /> })
-                    .collect_view()
+                let list = characters.get().unwrap_or_default();
+                if list.is_empty() {
+                    view! {
+                        <div class="mascot-empty-state">
+                            <crate::components::mascot::Aeth state=Signal::derive(|| crate::components::mascot::MascotState::Empty) class="mascot-empty" />
+                            <p style="color: var(--color-text-muted); font-size: 0.875rem;">"No one's here yet."</p>
+                        </div>
+                    }.into_any()
+                } else {
+                    list.into_iter()
+                        .map(|character: Character| view! { <CharacterListItem character=character forbid_media=forbid_media /> })
+                        .collect_view()
+                        .into_any()
+                }
             }}
         </div>
     }
