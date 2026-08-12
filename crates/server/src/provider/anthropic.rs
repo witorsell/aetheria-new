@@ -210,7 +210,7 @@ impl ModelProvider for AnthropicProvider {
                                     }
                                 }
                             } else if event_type == "error" {
-                                yield Ok(format!("\\n[Anthropic Error: {}]", data));
+                                yield Ok(format!("\n[Anthropic Error: {}]", data));
                             }
                         }
                     }
