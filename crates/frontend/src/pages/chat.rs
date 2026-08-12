@@ -250,6 +250,9 @@ pub fn ChatPage() -> impl IntoView {
     let (edit_text, set_edit_text) = signal(String::new());
     let (open_prompt_id, set_open_prompt_id) = signal(None::<String>);
 
+    // persists across streaming re-renders
+    let (thought_open_states, set_thought_open_states) = signal(HashMap::<String, bool>::new());
+
     let message_list_ref = NodeRef::<Ul>::new();
     let (did_initial_scroll, set_did_initial_scroll) = signal(false);
 
@@ -980,8 +983,11 @@ pub fn ChatPage() -> impl IntoView {
                                             }.into_any()
                                         } else if is_greeting_msg {
                                             let content_fallback = content.clone();
+                                            let thought_id = id.clone();
+                                            let tos = thought_open_states;
+                                            let stos = set_thought_open_states;
                                             view! {
-                                                {thought.map(|t| view! { <Thought text=t forbid_media=forbid_media() /> })}
+                                                {thought.map(|t| view! { <Thought text=t message_id=thought_id.clone() open_states=tos set_open_states=stos forbid_media=forbid_media() /> })}
                                                 <div>{move || {
                                                     let all = greetings.get();
                                                     let idx = greeting_index.get();
@@ -996,8 +1002,11 @@ pub fn ChatPage() -> impl IntoView {
                                                 }}</div>
                                             }.into_any()
                                         } else {
+                                            let thought_id = id.clone();
+                                            let tos = thought_open_states;
+                                            let stos = set_thought_open_states;
                                             view! {
-                                                {thought.map(|t| view! { <Thought text=t forbid_media=forbid_media() /> })}
+                                                {thought.map(|t| view! { <Thought text=t message_id=thought_id.clone() open_states=tos set_open_states=stos forbid_media=forbid_media() /> })}
                                                 <div>{rendered}</div>
                                             }.into_any()
                                         }}
@@ -1125,6 +1134,9 @@ pub fn ChatPage() -> impl IntoView {
                                                                         title="Confirm version"
                                                                         on:click=move |_| {
                                                                             set_confirmed_children.update(|map| {
+                                                                                map.insert(pc.clone(), ic.clone());
+                                                                            });
+                                                                            set_selected_children.update(|map| {
                                                                                 map.insert(pc.clone(), ic.clone());
                                                                             });
                                                                         }
@@ -1309,6 +1321,9 @@ pub fn ChatPage() -> impl IntoView {
                             let (_, avatar) = speaker_for(&char_map, &None, &Some(character_id));
                             let (visible_body, thought) = crate::render::reasoning::extract_thinking(&content);
                             let rendered = crate::render::markdown::render_markdown(&visible_body, &name, &user_name_sig.get(), forbid_media());
+                            let thought_id = format!("group_{}", name);
+                            let tos = thought_open_states;
+                            let stos = set_thought_open_states;
                             view! {
                                 <li class="message-row assistant">
                                     {avatar.filter(|url| !url.is_empty() && !forbid_media()).map(|url| view! {
@@ -1317,7 +1332,7 @@ pub fn ChatPage() -> impl IntoView {
                                     <div class="message-content-wrapper">
                                         <div class="message-header"><strong>{name}</strong></div>
                                         <div class="message-body">
-                                            {thought.map(|t| view! { <Thought text=t forbid_media=forbid_media() /> })}
+                                            {thought.map(|t| view! { <Thought text=t message_id=thought_id.clone() open_states=tos set_open_states=stos forbid_media=forbid_media() /> })}
                                             <div>{rendered}</div>
                                         </div>
                                     </div>
@@ -1350,9 +1365,13 @@ pub fn ChatPage() -> impl IntoView {
                                 <strong>{move || if is_self_reply.get() { user_name_sig.get() } else { streaming_speaker.get().0 }}</strong>
                             </div>
                             <div class="message-body">
-                                <Thought forbid_media=forbid_media() text=Signal::derive(move || {
-                                    extracted_stream.get().1.unwrap_or_default()
-                                }) />
+                                <Thought
+                                    forbid_media=forbid_media()
+                                    text=Signal::derive(move || extracted_stream.get().1.unwrap_or_default())
+                                    message_id="streaming"
+                                    open_states=thought_open_states
+                                    set_open_states=set_thought_open_states
+                                />
                                 <div>
                                     {move || {
                                         crate::render::markdown::render_markdown(

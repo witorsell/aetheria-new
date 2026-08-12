@@ -2,21 +2,39 @@ use leptos::prelude::*;
 use std::collections::HashMap;
 
 #[component]
-pub(super) fn Thought(#[prop(into)] text: Signal<String>, forbid_media: bool) -> impl IntoView {
-    let (open, set_open) = signal(false);
+pub(super) fn Thought(
+    #[prop(into)] text: Signal<String>,
+    #[prop(into)] message_id: String,
+    #[prop(into)] open_states: Signal<HashMap<String, bool>>,
+    #[prop(into)] set_open_states: WriteSignal<HashMap<String, bool>>,
+    forbid_media: bool,
+) -> impl IntoView {
+    let tid: ReadSignal<String> = signal(message_id).0;
+    let should_show = move || !text.get().is_empty();
+    let is_open = move || open_states.get().get(&tid.get()).copied().unwrap_or(false);
 
     view! {
         <div>
-            <Show when=move || !text.get().is_empty()>
-                <div class="thought-toggle" on:click=move |_| set_open.update(|o| *o = !*o)>
-                    "Thought "{move || if open.get() { "-" } else { "+" }}
-                </div>
-            </Show>
-            <Show when=move || open.get()>
-                <div class="thought-content">
-                    {move || crate::render::markdown::render_markdown(&text.get(), "", "", forbid_media)}
-                </div>
-            </Show>
+            {move || should_show().then(move || {
+                view! {
+                    <div class="thought-toggle" on:click=move |_| {
+                        let t = tid.get();
+                        set_open_states.update(|map| {
+                            let cur = map.get(&t).copied().unwrap_or(false);
+                            map.insert(t, !cur);
+                        });
+                    }>
+                        "Thought "{move || if is_open() { "-" } else { "+" }}
+                    </div>
+                }
+            })}
+            {move || is_open().then(move || {
+                view! {
+                    <div class="thought-content">
+                        {move || crate::render::markdown::render_markdown(&text.get(), "", "", forbid_media)}
+                    </div>
+                }
+            })}
         </div>
     }
 }
