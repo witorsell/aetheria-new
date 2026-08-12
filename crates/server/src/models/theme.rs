@@ -115,6 +115,57 @@ pub fn builtin_by_id(id: &str) -> Option<ThemeTokens> {
     }
 }
 
+fn st_avatar_style(n: i64) -> String {
+    match n {
+        0 => "circle".into(),
+        3 => "square".into(),
+        _ => "rounded".into(),
+    }
+}
+
+fn st_chat_display(n: i64) -> String {
+    match n {
+        0 => "flat".into(),
+        _ => "bubble".into(),
+    }
+}
+
+/// translates a raw SillyTavern theme JSON export onto aetheria's token
+/// set. fields aetheria has that ST doesn't (mascot_*, radius_*) are left at
+/// the default theme's values. returns a warning if `custom_css` contained
+/// an `@import` (a tracking/XSS vector ST itself warns about on import), with
+/// the `@import` statement stripped from the stored value.
+pub fn st_to_aetheria(raw: &serde_json::Value) -> (ThemeTokens, Option<String>) {
+    let mut tokens = default_theme_tokens();
+    let s = |key: &str| raw.get(key).and_then(|v| v.as_str()).map(|s| s.to_string());
+    let f = |key: &str| raw.get(key).and_then(|v| v.as_f64());
+    let i = |key: &str| raw.get(key).and_then(|v| v.as_i64());
+
+    if let Some(v) = s("main_text_color") { tokens.color_text = v; }
+    if let Some(v) = s("quote_text_color") { tokens.color_text_muted = v; }
+    if let Some(v) = s("blur_tint_color") { tokens.color_surface = v; }
+    if let Some(v) = s("border_color") { tokens.color_border = v; }
+    if let Some(v) = f("blur_strength") { tokens.blur_strength = v; }
+    if let Some(v) = f("shadow_width") { tokens.shadow_strength = v; }
+    if let Some(v) = f("font_scale") { tokens.font_scale = v; }
+    if let Some(v) = f("chat_width") { tokens.chat_width = v; }
+    if let Some(v) = i("avatar_style") { tokens.avatar_style = st_avatar_style(v); }
+    if let Some(v) = i("chat_display") { tokens.chat_display = st_chat_display(v); }
+
+    let mut warning = None;
+    if let Some(css) = s("custom_css") {
+        if css.contains("@import") {
+            let re = regex::Regex::new(r"@import[^;]*;").unwrap();
+            tokens.custom_css = re.replace_all(&css, "").trim().to_string();
+            warning = Some("The imported theme's custom CSS contained an @import rule, which was removed. @import can be used to load external stylesheets that track or fingerprint you.".to_string());
+        } else {
+            tokens.custom_css = css;
+        }
+    }
+
+    (tokens, warning)
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct ThemeRow {
     id: String,
@@ -257,5 +308,44 @@ mod tests {
         assert_eq!(db.writer.get_active_theme_id(1).await.unwrap(), "default");
         db.writer.set_active_theme(1, "light".into()).await.unwrap();
         assert_eq!(db.writer.get_active_theme_id(1).await.unwrap(), "light");
+    }
+
+    #[test]
+    fn st_import_maps_known_fields() {
+        let raw = serde_json::json!({
+            "name": "Cappuccino",
+            "blur_strength": 3,
+            "main_text_color": "rgba(235,235,235,1)",
+            "quote_text_color": "rgba(165,140,115,1)",
+            "blur_tint_color": "rgba(34,30,32,0.95)",
+            "shadow_color": "rgba(0,0,0,0.3)",
+            "shadow_width": 1,
+            "border_color": "rgba(80,80,80,0.89)",
+            "font_scale": 1,
+            "avatar_style": 2,
+            "chat_display": 1,
+            "chat_width": 50,
+            "custom_css": ""
+        });
+        let (tokens, warning) = st_to_aetheria(&raw);
+        assert_eq!(tokens.color_text, "rgba(235,235,235,1)");
+        assert_eq!(tokens.color_border, "rgba(80,80,80,0.89)");
+        assert_eq!(tokens.blur_strength, 3.0);
+        assert_eq!(tokens.avatar_style, "rounded"); // ST's avatar_style 2
+        assert_eq!(tokens.chat_display, "bubble");  // ST's chat_display 1
+        assert!(warning.is_none());
+        // fields aetheria has that ST doesn't fall back to the default theme
+        assert_eq!(tokens.mascot_accent, default_theme_tokens().mascot_accent);
+    }
+
+    #[test]
+    fn st_import_strips_and_warns_on_at_import_in_custom_css() {
+        let raw = serde_json::json!({
+            "custom_css": "@import url('https://evil.example/track.css'); .foo { color: red; }"
+        });
+        let (tokens, warning) = st_to_aetheria(&raw);
+        assert!(!tokens.custom_css.contains("@import"));
+        assert!(tokens.custom_css.contains(".foo"));
+        assert!(warning.is_some());
     }
 }
