@@ -6,6 +6,7 @@ pub mod message;
 pub mod preset;
 pub mod regex_script;
 pub mod settings;
+pub mod theme;
 pub mod user;
 pub mod tavern;
 pub mod group;
