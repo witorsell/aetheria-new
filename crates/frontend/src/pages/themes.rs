@@ -2,7 +2,7 @@ use crate::api;
 use crate::theme::ThemeStore;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos_router::hooks::use_params_map;
+use leptos_router::hooks::{use_navigate, use_params_map};
 
 #[component]
 pub fn ThemesPage() -> impl IntoView {
@@ -13,6 +13,7 @@ pub fn ThemesPage() -> impl IntoView {
     });
     let theme_store = use_context::<ThemeStore>();
     let (error, set_error) = signal(Option::<String>::None);
+    let navigate = use_navigate();
 
     let own_file_input = NodeRef::<leptos::html::Input>::new();
     let on_import_own = move |ev: leptos::ev::Event| {
@@ -20,7 +21,12 @@ pub fn ThemesPage() -> impl IntoView {
         if let Some(file) = input.files().and_then(|f| f.item(0)) {
             spawn_local(async move {
                 match api::import_theme(file).await {
-                    Ok(_) => version.update(|v| *v += 1),
+                    Ok((_, warning)) => {
+                        version.update(|v| *v += 1);
+                        if let Some(w) = warning {
+                            set_error.set(Some(w));
+                        }
+                    }
                     Err(e) => set_error.set(Some(format!("Failed to import theme: {e}"))),
                 }
             });
@@ -58,6 +64,9 @@ pub fn ThemesPage() -> impl IntoView {
                                 let id_for_delete = t.id.clone();
                                 let id_for_export = t.id.clone();
                                 let name_for_export = t.name.clone();
+                                let name_for_duplicate = t.name.clone();
+                                let tokens_for_duplicate = t.tokens.clone();
+                                let navigate_for_duplicate = navigate.clone();
                                 let edit_href = format!("/themes/{}/edit", t.id);
                                 let builtin = t.builtin;
                                 let is_active = t.active;
@@ -102,6 +111,20 @@ pub fn ThemesPage() -> impl IntoView {
                                                 }
                                             });
                                         }>"Export"</button>
+                                        <button class="btn secondary" on:click=move |_| {
+                                            let name = format!("{} (copy)", name_for_duplicate.clone());
+                                            let tokens = tokens_for_duplicate.clone();
+                                            let navigate = navigate_for_duplicate.clone();
+                                            spawn_local(async move {
+                                                match api::create_theme(&name, &tokens).await {
+                                                    Ok(new_theme) => {
+                                                        version.update(|v| *v += 1);
+                                                        navigate(&format!("/themes/{}/edit", new_theme.id), Default::default());
+                                                    }
+                                                    Err(e) => set_error.set(Some(format!("Failed to duplicate theme: {e}"))),
+                                                }
+                                            });
+                                        }>"Duplicate"</button>
                                         {if !builtin {
                                             view! {
                                                 <button class="btn ghost" on:click=move |_| {
@@ -144,6 +167,7 @@ pub fn ThemesPage() -> impl IntoView {
 pub fn ThemeEditorPage() -> impl IntoView {
     let params = use_params_map();
     let id = move || params.with(|p| p.get("id").unwrap_or_default().to_string());
+    let theme_store = use_context::<ThemeStore>();
 
     let theme = LocalResource::new(move || {
         let current_id = id();
