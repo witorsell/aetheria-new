@@ -100,13 +100,13 @@ impl ModelProvider for NovelProvider {
             }
 
             let mut stream = response.bytes_stream();
+            let mut pending_bytes: Vec<u8> = Vec::new();
             let mut buffer = String::new();
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        buffer.push_str(&text);
+                        buffer.push_str(&super::decode_utf8_chunk(&mut pending_bytes, &bytes));
 
                         while let Some(idx) = buffer.find('\n') {
                             let line = buffer[..idx].trim().to_string();

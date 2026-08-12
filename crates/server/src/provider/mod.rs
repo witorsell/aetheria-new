@@ -164,8 +164,13 @@ struct StreamDelta {
     reasoning: Option<String>,
 }
 
-// decode stream chunk, buffering partial utf8 sequences
-fn decode_utf8_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> String {
+// decode stream chunk, buffering partial utf8 sequences. shared by every
+// provider's streaming loop - bytes_stream() chunk boundaries land wherever
+// the network happened to split the TCP stream, with no relationship to
+// UTF-8 character boundaries, so decoding each chunk in isolation destroys
+// any multi-byte character (em dash, curly quotes, ellipsis, accented
+// letters - all common in roleplay text) that happens to straddle one.
+pub(crate) fn decode_utf8_chunk(pending: &mut Vec<u8>, chunk: &[u8]) -> String {
     pending.extend_from_slice(chunk);
     let mut decoded = String::new();
 
