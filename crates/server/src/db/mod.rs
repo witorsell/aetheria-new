@@ -71,17 +71,26 @@ pub async fn connect(path: &str) -> Db {
             tracing::info!(
                 "existing database detected, reconciling _sqlx_migrations to squashed baseline"
             );
-            let _ = sqlx::query("DELETE FROM _sqlx_migrations")
+            sqlx::query("DELETE FROM _sqlx_migrations")
                 .execute(&read_pool)
-                .await;
-            let _ = sqlx::query(
+                .await
+                .expect("clearing stale migration records should not fail");
+            sqlx::query(
                 "INSERT INTO _sqlx_migrations \
-                 (version, description, installed_on, checksum, execution_time) \
-                 VALUES (1, 'init', CURRENT_TIMESTAMP, ?, 0)",
+                 (version, description, installed_on, success, checksum, execution_time) \
+                 VALUES (1, 'init', CURRENT_TIMESTAMP, TRUE, ?, 0)",
             )
             .bind(base_checksum.as_slice())
             .execute(&read_pool)
-            .await;
+            .await
+            .expect("recording the squashed baseline migration should not fail");
+            // the reconciliation above only backfills the baseline row; any
+            // migration added after the squash point (like the themes table)
+            // still needs to actually run against this pre-existing database.
+            migrator
+                .run(&read_pool)
+                .await
+                .expect("migrations newer than the squashed baseline should apply");
         } else {
             // no schema yet, run migrations to create it
             migrator
