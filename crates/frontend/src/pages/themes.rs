@@ -191,6 +191,15 @@ pub fn ThemeEditorPage() -> impl IntoView {
         crate::theme::apply_tokens_to_root(&tokens.get());
     });
 
+    // an edit that's never saved shouldn't outlive the page it was made on:
+    // restore the actually-active theme's tokens when the editor unmounts,
+    // so navigating away without saving doesn't leave the preview stuck.
+    on_cleanup(move || {
+        if let Some(store) = theme_store {
+            crate::theme::apply_tokens_to_root(&store.0.get_untracked());
+        }
+    });
+
     let (saved, set_saved) = signal(false);
     let on_save = move |_| {
         let current_id = id();
