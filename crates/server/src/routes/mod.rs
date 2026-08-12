@@ -30,6 +30,7 @@ pub mod import_export;
 pub mod proxy;
 pub mod lorebooks;
 pub mod presets;
+pub mod themes;
 pub mod regex_scripts;
 pub mod groups;
 
@@ -67,6 +68,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/presets/{id}/export", get(presets::export_preset))
         .route("/api/presets/{id}/order", put(presets::update_order))
         .route("/api/presets/activate", post(presets::activate))
+        // themes
+        .route("/api/themes", get(themes::list).post(themes::create))
+        .route("/api/themes/active", get(themes::get_active))
+        .route("/api/themes/{id}", get(themes::get_theme).put(themes::update).delete(themes::delete))
+        .route("/api/themes/{id}/export", get(themes::export_theme))
+        .route("/api/themes/activate", post(themes::activate))
         // regex scripts
         .route("/api/regex-scripts", get(regex_scripts::list).post(regex_scripts::import))
         .route("/api/regex-scripts/export", get(regex_scripts::export_all))
