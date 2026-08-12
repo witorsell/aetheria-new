@@ -42,7 +42,23 @@ pub async fn bootstrap_user(db: &db::Db, username: &str, password: &str) {
         .fetch_one(&db.read_pool)
         .await
         .expect("failed to count users");
-    if count > 0 {
+
+    // migration 0011_multi_user.sql seeds a placeholder id=1/'admin'/empty-hash
+    // row on every fresh database (it exists to satisfy the user_id foreign
+    // keys added later in that same migration for pre-existing single-user
+    // installs being upgraded). on a genuinely new install that placeholder is
+    // the only row, and it isn't a real bootstrapped account, so it must not
+    // block first-run bootstrap the way a real user would.
+    let only_unclaimed_placeholder = count == 1
+        && sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE id = 1 AND username = 'admin' AND password_hash = ''",
+        )
+        .fetch_one(&db.read_pool)
+        .await
+        .expect("failed to check for the migration placeholder user")
+        == 1;
+
+    if count > 0 && !only_unclaimed_placeholder {
         tracing::info!("users already exist, skipping bootstrap");
         return;
     }
@@ -53,4 +69,50 @@ pub async fn bootstrap_user(db: &db::Db, username: &str, password: &str) {
         .expect("bootstrapping the initial user should not fail");
     // init settings for the new user
     db.writer.touch_settings().await.ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bootstrap_claims_the_migration_placeholder_on_a_fresh_database() {
+        let db = db::connect(":memory:").await;
+
+        // migration 0011 already seeded id=1/'admin'/'' at this point; a naive
+        // "any users exist" check would wrongly treat that as already-bootstrapped
+        let placeholder_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE id = 1 AND username = 'admin' AND password_hash = ''",
+        )
+        .fetch_one(&db.read_pool)
+        .await
+        .unwrap();
+        assert_eq!(placeholder_count, 1, "test assumes the migration placeholder exists before bootstrap runs");
+
+        bootstrap_user(&db, "testuser", "test-pass-1234").await;
+
+        let testuser = models::user::find_by_username(&db.read_pool, "testuser").await.unwrap();
+        assert!(testuser.is_some(), "bootstrap should have claimed the placeholder row as 'testuser'");
+
+        let stale_admin = models::user::find_by_username(&db.read_pool, "admin").await.unwrap();
+        assert!(stale_admin.is_none(), "the placeholder 'admin' row should have been renamed, not left behind alongside the real user");
+
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db.read_pool).await.unwrap();
+        assert_eq!(total, 1, "claiming the placeholder must not leave two rows behind");
+    }
+
+    #[tokio::test]
+    async fn bootstrap_does_not_overwrite_a_real_existing_user() {
+        let db = db::connect(":memory:").await;
+        bootstrap_user(&db, "testuser", "test-pass-1234").await;
+
+        // a second bootstrap call (e.g. env vars changed on restart) must not
+        // touch the now-real account
+        bootstrap_user(&db, "someone-else", "different-password").await;
+
+        let testuser = models::user::find_by_username(&db.read_pool, "testuser").await.unwrap();
+        assert!(testuser.is_some(), "the real user from the first bootstrap must survive a second bootstrap call");
+        let someone_else = models::user::find_by_username(&db.read_pool, "someone-else").await.unwrap();
+        assert!(someone_else.is_none(), "a second bootstrap call must not create or rename into a new account");
+    }
 }

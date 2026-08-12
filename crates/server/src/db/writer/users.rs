@@ -33,8 +33,27 @@ impl Writer {
 
     pub async fn upsert_user(&self, username: String, password_hash: String) -> sqlx::Result<()> {
         self.dispatch(move |conn| Box::pin(async move {
-            // only create the initial user if the table is empty
-            // never overwrite existing users even if their env creds change
+            // never overwrite a real existing user even if env creds change.
+            // but migration 0011's placeholder id=1/'admin'/empty-hash row
+            // (seeded on every fresh database for pre-existing single-user
+            // installs' FK needs) isn't a real bootstrapped user, so the first
+            // real boot claims it in place instead of being blocked by it.
+            let placeholder_id: Option<i64> = sqlx::query_scalar(
+                "SELECT id FROM users WHERE id = 1 AND username = 'admin' AND password_hash = ''",
+            )
+            .fetch_optional(&mut *conn)
+            .await?;
+
+            if let Some(id) = placeholder_id {
+                return sqlx::query("UPDATE users SET username = ?, password_hash = ? WHERE id = ?")
+                    .bind(&username)
+                    .bind(&password_hash)
+                    .bind(id)
+                    .execute(&mut *conn)
+                    .await
+                    .map(|_| ());
+            }
+
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
                 .fetch_one(&mut *conn)
                 .await?;
@@ -44,8 +63,8 @@ impl Writer {
             sqlx::query(
                 "INSERT INTO users (id, username, password_hash, session_secret) VALUES (1, ?, ?, '')",
             )
-            .bind(username)
-            .bind(password_hash)
+            .bind(&username)
+            .bind(&password_hash)
             .execute(&mut *conn)
             .await
             .map(|_| ())
