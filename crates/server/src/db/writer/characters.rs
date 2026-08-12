@@ -185,23 +185,25 @@ impl Writer {
         })).await
     }
 
-    pub async fn update_alternate_greeting(&self, user_id: i64, id: String, input: crate::models::character::AlternateGreetingInput) -> sqlx::Result<()> {
+    pub async fn update_alternate_greeting(&self, user_id: i64, character_id: String, id: String, input: crate::models::character::AlternateGreetingInput) -> sqlx::Result<bool> {
         let greeting = input.greeting;
         self.dispatch(move |conn| Box::pin(async move {
-            sqlx::query("UPDATE alternate_greetings SET greeting = ? WHERE id = ? AND user_id = ?")
+            sqlx::query("UPDATE alternate_greetings SET greeting = ? WHERE id = ? AND character_id = ? AND user_id = ?")
                 .bind(greeting)
                 .bind(id)
+                .bind(character_id)
                 .bind(user_id)
                 .execute(&mut *conn)
                 .await
-                .map(|_| ())
+                .map(|r| r.rows_affected() > 0)
         })).await
     }
 
-    pub async fn delete_alternate_greeting(&self, user_id: i64, id: String) -> sqlx::Result<bool> {
+    pub async fn delete_alternate_greeting(&self, user_id: i64, character_id: String, id: String) -> sqlx::Result<bool> {
         self.dispatch(move |conn| Box::pin(async move {
-            sqlx::query("DELETE FROM alternate_greetings WHERE id = ? AND user_id = ?")
+            sqlx::query("DELETE FROM alternate_greetings WHERE id = ? AND character_id = ? AND user_id = ?")
                 .bind(&id)
+                .bind(character_id)
                 .bind(user_id)
                 .execute(&mut *conn)
                 .await

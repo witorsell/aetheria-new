@@ -189,6 +189,7 @@ pub async fn add_greeting(
     Path(character_id): Path<String>,
     Json(input): Json<AlternateGreetingInput>,
 ) -> Result<Json<AlternateGreeting>, ApiError> {
+    validate_greeting_input(&input)?;
     state
         .db
         .writer
@@ -204,30 +205,31 @@ pub async fn add_greeting(
 pub async fn update_greeting(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
-    Path((_character_id, greeting_id)): Path<(String, String)>,
+    Path((character_id, greeting_id)): Path<(String, String)>,
     Json(input): Json<AlternateGreetingInput>,
 ) -> Result<StatusCode, ApiError> {
-    state
+    validate_greeting_input(&input)?;
+    let updated = state
         .db
         .writer
-        .update_alternate_greeting(user_id, greeting_id, input)
+        .update_alternate_greeting(user_id, character_id, greeting_id, input)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "failed to update greeting");
             ApiError::internal("Failed to update greeting")
         })?;
-    Ok(StatusCode::OK)
+    Ok(if updated { StatusCode::OK } else { StatusCode::NOT_FOUND })
 }
 
 pub async fn delete_greeting(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
-    Path((_character_id, greeting_id)): Path<(String, String)>,
+    Path((character_id, greeting_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     let deleted = state
         .db
         .writer
-        .delete_alternate_greeting(user_id, greeting_id)
+        .delete_alternate_greeting(user_id, character_id, greeting_id)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "failed to delete greeting");
@@ -406,7 +408,7 @@ pub async fn upload_avatar(
     // allowed extensions whitelist
     const ALLOWED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Ok(Some(mut field)) = multipart.next_field().await {
         let Some(name) = field.name().map(|s| s.to_string()) else {
             continue;
         };
@@ -431,14 +433,18 @@ pub async fn upload_avatar(
         let stored_name = format!("avatar_{character_id}.{ext}");
         let path = upload_dir.join(&stored_name);
 
-        let data = field
-            .bytes()
+        // chunk-by-chunk size check, not `field.bytes()` which would just
+        // buffer the whole upload before we even get to check MAX_AVATAR_SIZE
+        let mut data = Vec::new();
+        while let Some(chunk) = field
+            .chunk()
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("read failed: {e}")))?;
-
-        // enforce size limit
-        if data.len() > MAX_AVATAR_SIZE {
-            return Err((StatusCode::PAYLOAD_TOO_LARGE, format!("File too large. Maximum size is {} bytes", MAX_AVATAR_SIZE)));
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("read failed: {e}")))?
+        {
+            if data.len() + chunk.len() > MAX_AVATAR_SIZE {
+                return Err((StatusCode::PAYLOAD_TOO_LARGE, format!("File too large. Maximum size is {} bytes", MAX_AVATAR_SIZE)));
+            }
+            data.extend_from_slice(&chunk);
         }
 
         let mut file = fs::File::create(&path)
