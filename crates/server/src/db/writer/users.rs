@@ -2,32 +2,45 @@ use super::*;
 
 impl Writer {
     pub async fn create_user(&self, username: String, password_hash: String) -> sqlx::Result<()> {
-        self.dispatch(move |conn| Box::pin(async move {
-            sqlx::query(
-                "INSERT INTO users (id, username, password_hash, session_secret)
-                 VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM users), ?, ?, '')",
-            )
-            .bind(username)
-            .bind(password_hash)
-            .execute(&mut *conn)
-            .await
-            .map(|_| ())
-        })).await?;
-
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
 
+        // both inserts must land in the same dispatch: the writer actor only
+        // guarantees one job runs at a time, not that a caller's two separate
+        // dispatch() calls run back-to-back with nothing interleaved between
+        // them. a concurrent create_user's own INSERT landing between these
+        // two used to point the settings row at (SELECT MAX(id) FROM users) -
+        // whichever user was newest by the time THIS query ran, not
+        // necessarily the one just created here.
         self.dispatch(move |conn| Box::pin(async move {
+            let mut tx = conn.begin().await?;
+
+            sqlx::query(
+                "INSERT INTO users (id, username, password_hash, session_secret)
+                 VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM users), ?, ?, '')",
+            )
+            .bind(&username)
+            .bind(&password_hash)
+            .execute(&mut *tx)
+            .await?;
+
+            let user_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+                .fetch_one(&mut *tx)
+                .await?;
+
             sqlx::query(
                 "INSERT INTO settings (user_id, api_base_url, api_key, model_name, system_prompt, updated_at)
-                 VALUES ((SELECT MAX(id) FROM users), '', '', '', '', ?)",
+                 VALUES (?, '', '', '', '', ?)",
             )
+            .bind(user_id)
             .bind(now)
-            .execute(&mut *conn)
-            .await
-            .map(|_| ())
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+            Ok(())
         })).await
     }
 
