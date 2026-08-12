@@ -3,6 +3,7 @@ mod app;
 mod components;
 mod pages;
 mod render;
+mod theme;
 
 use app::App;
 
