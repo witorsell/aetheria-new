@@ -53,6 +53,61 @@ struct AnthropicDelta {
 
 pub struct AnthropicProvider;
 
+// system prompt + role-normalized turns, split out from stream_completion so
+// it's testable without a live HTTP call.
+fn build_anthropic_messages(messages: Vec<crate::provider::prompt::ChatMessage>) -> (String, Vec<AnthropicMessage>) {
+    let mut anthropic_messages: Vec<AnthropicMessage> = Vec::new();
+    let mut system_prompt = String::new();
+
+    for msg in messages {
+        if msg.role == Role::System {
+            if system_prompt.is_empty() {
+                system_prompt = msg.content;
+            } else {
+                system_prompt.push_str("\n");
+                system_prompt.push_str(&msg.content);
+            }
+        } else {
+            // roles can only be 'user' or 'assistant'.
+            // any 'system' roles that come later should just be 'user'.
+            // but in our build_messages, system is only at the beginning.
+            //
+            // claude requires strict user/assistant alternation starting
+            // with user and rejects a request with two consecutive
+            // same-role turns outright - and build_messages can
+            // legitimately produce those (e.g. a preset's own role="user"
+            // prompt injections landing next to each other, or next to
+            // the real user turn). merge into the previous turn instead
+            // of trusting the assembled order to already alternate,
+            // mirroring how the Gemini provider handles the same
+            // requirement.
+            let role = msg.role.as_str().to_string();
+            if let Some(last) = anthropic_messages.last_mut() {
+                if last.role == role {
+                    last.content.push_str("\n\n");
+                    last.content.push_str(&msg.content);
+                    continue;
+                }
+            }
+            anthropic_messages.push(AnthropicMessage { role, content: msg.content });
+        }
+    }
+
+    // claude also 400s if the first turn isn't 'user' - which is exactly
+    // what happens on turn one of any chat whose character has a greeting,
+    // since that greeting is persisted as real history with role
+    // 'assistant' the moment the chat is created (see routes/chats.rs),
+    // not synthesized fresh into the prompt only when there's no history yet.
+    if anthropic_messages.first().is_some_and(|m| m.role != "user") {
+        anthropic_messages.insert(0, AnthropicMessage {
+            role: "user".to_string(),
+            content: "[Start a new chat]".to_string(),
+        });
+    }
+
+    (system_prompt, anthropic_messages)
+}
+
 #[async_trait]
 impl ModelProvider for AnthropicProvider {
     async fn stream_completion(
@@ -65,42 +120,7 @@ impl ModelProvider for AnthropicProvider {
         sampling: crate::provider::SamplingParams,
     ) -> Pin<Box<dyn futures_util::Stream<Item = Result<String, ProviderError>> + Send>> {
 
-        let mut anthropic_messages: Vec<AnthropicMessage> = Vec::new();
-        let mut system_prompt = String::new();
-
-        for msg in messages {
-            if msg.role == Role::System {
-                if system_prompt.is_empty() {
-                    system_prompt = msg.content;
-                } else {
-                    system_prompt.push_str("\n");
-                    system_prompt.push_str(&msg.content);
-                }
-            } else {
-                // roles can only be 'user' or 'assistant'.
-                // any 'system' roles that come later should just be 'user'.
-                // but in our build_messages, system is only at the beginning.
-                //
-                // claude requires strict user/assistant alternation starting
-                // with user and rejects a request with two consecutive
-                // same-role turns outright - and build_messages can
-                // legitimately produce those (e.g. a preset's own role="user"
-                // prompt injections landing next to each other, or next to
-                // the real user turn). merge into the previous turn instead
-                // of trusting the assembled order to already alternate,
-                // mirroring how the Gemini provider handles the same
-                // requirement.
-                let role = msg.role.as_str().to_string();
-                if let Some(last) = anthropic_messages.last_mut() {
-                    if last.role == role {
-                        last.content.push_str("\n\n");
-                        last.content.push_str(&msg.content);
-                        continue;
-                    }
-                }
-                anthropic_messages.push(AnthropicMessage { role, content: msg.content });
-            }
-        }
+        let (system_prompt, anthropic_messages) = build_anthropic_messages(messages);
 
         // extended thinking won't take temperature/top_p/top_k in the same
         // request, and max_tokens has to leave room past the thinking budget
@@ -245,5 +265,88 @@ impl ModelProvider for AnthropicProvider {
                 yield Ok("</think>".to_string());
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::prompt::ChatMessage;
+
+    fn msg(role: Role, content: &str) -> ChatMessage {
+        ChatMessage { role, content: content.to_string() }
+    }
+
+    #[test]
+    fn greeting_first_history_gets_a_synthetic_leading_user_turn() {
+        // this is the shape build_messages produces for turn one of any
+        // chat whose character has a greeting: system prompt, then the
+        // persisted greeting as the first real turn, role assistant.
+        let messages = vec![
+            msg(Role::System, "you are a helpful assistant"),
+            msg(Role::Assistant, "hello there"),
+            msg(Role::User, "hi"),
+        ];
+        let (_, turns) = build_anthropic_messages(messages);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].content, "hello there");
+        assert_eq!(turns[2].role, "user");
+        assert_eq!(turns[2].content, "hi");
+    }
+
+    #[test]
+    fn respond_as_user_on_an_untouched_greeting_also_gets_the_synthetic_turn() {
+        // respond_as_user appends a trailing system instruction rather than
+        // a user turn, so with nothing else in history yet this still ends
+        // up assistant-first after system stripping.
+        let messages = vec![
+            msg(Role::System, "you are a helpful assistant"),
+            msg(Role::Assistant, "hello there"),
+            msg(Role::System, "continue as the user"),
+        ];
+        let (_, turns) = build_anthropic_messages(messages);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns.len(), 2);
+    }
+
+    #[test]
+    fn user_first_history_is_left_alone() {
+        let messages = vec![
+            msg(Role::System, "you are a helpful assistant"),
+            msg(Role::User, "hi"),
+            msg(Role::Assistant, "hello"),
+        ];
+        let (_, turns) = build_anthropic_messages(messages);
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[0].content, "hi");
+    }
+
+    #[test]
+    fn consecutive_same_role_turns_still_merge() {
+        let messages = vec![
+            msg(Role::User, "hi"),
+            msg(Role::User, "are you there"),
+            msg(Role::Assistant, "yes"),
+        ];
+        let (_, turns) = build_anthropic_messages(messages);
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[0].content, "hi\n\nare you there");
+    }
+
+    #[test]
+    fn system_messages_are_pulled_out_regardless_of_position() {
+        let messages = vec![
+            msg(Role::System, "head system"),
+            msg(Role::User, "hi"),
+            msg(Role::System, "tail system"),
+        ];
+        let (system, turns) = build_anthropic_messages(messages);
+        assert_eq!(system, "head system\ntail system");
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].role, "user");
     }
 }

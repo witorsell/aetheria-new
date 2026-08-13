@@ -192,10 +192,9 @@ impl ModelProvider for HordeProvider {
                 }
 
                 if check.done {
-                    if let Some(gens) = check.generations {
-                        if let Some(first) = gens.first() {
-                            yield Ok(first.text.clone());
-                        }
+                    match check.generations.as_ref().and_then(|gens| gens.first()) {
+                        Some(first) => yield Ok(first.text.clone()),
+                        None => yield Err(ProviderError::Status(502, "Horde marked the job done but returned no generation".to_string())),
                     }
                     return;
                 }
