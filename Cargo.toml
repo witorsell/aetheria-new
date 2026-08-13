@@ -3,7 +3,16 @@ resolver = "2"
 members = ["crates/frontend", "crates/server"]
 
 [profile.release]
-opt-level = "z"
+# used for the server binary. opt-level=3 favors runtime speed, which
+# matters for a latency-sensitive SSE streaming server - binary size on
+# disk is irrelevant for a self-hosted process the way it is for a wasm
+# bundle a browser has to download. the frontend build uses the separate
+# wasm-release profile below instead, where size is what actually matters.
+opt-level = 3
 lto = true
 codegen-units = 1
 # panic = "unwind" (default) so panics in one handler 500 instead of killing the process
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
