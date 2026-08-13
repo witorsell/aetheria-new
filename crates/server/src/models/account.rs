@@ -21,6 +21,7 @@ pub struct CharacterExport {
     pub folder_name: Option<String>,
     pub tags: Vec<String>,
     pub alternate_greetings: Vec<String>,
+    pub lorebook_ids: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -88,6 +89,7 @@ pub struct ChatExport {
     pub group_id: Option<String>,
     pub title: String,
     pub lorebook_ids: Vec<String>,
+    pub lorebooks_customized: bool,
     pub messages: Vec<MessageExport>,
 }
 
@@ -125,6 +127,7 @@ pub async fn export_all(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<A
             .into_iter()
             .filter_map(|id| tag_names.get(&id).cloned())
             .collect();
+        let lorebook_ids = crate::models::lorebook::list_character_lorebooks(pool, user_id, &c.id).await?;
         character_exports.push(CharacterExport {
             id: c.id.clone(),
             name: c.name.clone(),
@@ -144,6 +147,7 @@ pub async fn export_all(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<A
             folder_name: c.folder_id.as_ref().and_then(|id| folder_names.get(id).cloned()),
             tags,
             alternate_greetings: greetings,
+            lorebook_ids,
         });
     }
 
@@ -227,11 +231,22 @@ pub async fn export_all(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<A
         })
         .collect();
         let lorebook_ids = crate::models::lorebook::list_chat_lorebooks(pool, user_id, &chat.id).await?;
+        // `lorebooks_customized` isn't on the `Chat` struct itself (that
+        // struct is used all over the codebase and this field is only
+        // needed here), so it's read directly off the row instead of
+        // widening the shared struct for one caller.
+        let lorebooks_customized: bool =
+            sqlx::query_scalar("SELECT lorebooks_customized FROM chats WHERE id = ? AND user_id = ?")
+                .bind(&chat.id)
+                .bind(user_id)
+                .fetch_one(pool)
+                .await?;
         chat_exports.push(ChatExport {
             character_id: chat.character_id.clone(),
             group_id: chat.group_id.clone(),
             title: chat.title.clone(),
             lorebook_ids,
+            lorebooks_customized,
             messages,
         });
     }

@@ -168,6 +168,23 @@ impl Writer {
                 lorebook_id_map.insert(l.id.clone(), new_id);
             }
 
+            // character_lorebooks: wire each character back up to its
+            // lorebook attachments, now that both id maps exist. mirrors the
+            // graceful-skip pattern used for group members and chat
+            // lorebooks below - an id that isn't in the map (e.g. a
+            // hand-edited export) is silently dropped rather than failing
+            // the whole import.
+            for c in &export.characters {
+                let Some(new_char_id) = character_id_map.get(&c.id) else { continue };
+                for old_lb_id in &c.lorebook_ids {
+                    if let Some(new_lb_id) = lorebook_id_map.get(old_lb_id) {
+                        sqlx::query("INSERT INTO character_lorebooks (user_id, character_id, lorebook_id) VALUES (?, ?, ?)")
+                            .bind(user_id).bind(new_char_id).bind(new_lb_id)
+                            .execute(&mut *tx).await?;
+                    }
+                }
+            }
+
             // groups, remapping old export id -> new db id, plus members
             // (resolved through character_id_map - a member whose character
             // wasn't in this export, e.g. a partially-corrupted file, is
@@ -201,11 +218,11 @@ impl Writer {
                 let new_character_id = chat.character_id.as_ref().and_then(|id| character_id_map.get(id));
                 let new_group_id = chat.group_id.as_ref().and_then(|id| group_id_map.get(id));
                 sqlx::query(
-                    "INSERT INTO chats (user_id, id, character_id, group_id, title, created_at, updated_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO chats (user_id, id, character_id, group_id, title, lorebooks_customized, created_at, updated_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 )
                 .bind(user_id).bind(&new_chat_id).bind(new_character_id).bind(new_group_id)
-                .bind(&chat.title).bind(now).bind(now)
+                .bind(&chat.title).bind(chat.lorebooks_customized).bind(now).bind(now)
                 .execute(&mut *tx).await?;
 
                 let mut message_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
