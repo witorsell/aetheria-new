@@ -172,7 +172,7 @@ pub async fn maybe_update_chat_summary(state: &AppState, user_id: i64, chat_id: 
     };
 
     let stream = provider
-        .stream_completion(cfg.api_base_url, cfg.api_key, cfg.model_name, messages, crate::provider::SamplingParams::default())
+        .stream_completion(state.http_client.clone(), cfg.api_base_url, cfg.api_key, cfg.model_name, messages, crate::provider::SamplingParams::default())
         .await;
     let pieces: Vec<String> = stream.filter_map(|r| async move { r.ok() }).collect().await;
     let (summary, _) = crate::reasoning::extract_thinking(&pieces.concat());

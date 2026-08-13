@@ -43,12 +43,20 @@ struct HordeStatusResponse {
     message: Option<String>,
 }
 
+// AI Horde is a volunteer-worker queue, not a real-time API - a submitted
+// job can sit unpicked for a long time under load, but an abandoned/orphaned
+// one should never poll forever. bounds how long stream_completion will
+// keep waiting on one job before giving up.
+const MAX_POLL_DURATION: std::time::Duration = std::time::Duration::from_secs(600);
+const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2500);
+
 pub struct HordeProvider;
 
 #[async_trait]
 impl ModelProvider for HordeProvider {
     async fn stream_completion(
         &self,
+        http_client: reqwest::Client,
         base_url: String,
         api_key: String,
         model: String,
@@ -86,10 +94,21 @@ impl ModelProvider for HordeProvider {
 
         Box::pin(async_stream::stream! {
             let mut headers = HeaderMap::new();
-            if let Ok(key) = HeaderValue::from_str(&api_key) {
-                headers.insert("apikey", key);
-            } else {
+            // "0000000000" is Horde's own well-known anonymous key, the
+            // correct fallback when no key was configured at all. but a
+            // non-empty key that just fails to parse as a header value is a
+            // real typo/corruption, not a deliberate choice to go anonymous -
+            // silently reinterpreting it as anonymous used to hide that.
+            if api_key.trim().is_empty() {
                 headers.insert("apikey", HeaderValue::from_static("0000000000"));
+            } else {
+                match HeaderValue::from_str(&api_key) {
+                    Ok(key) => { headers.insert("apikey", key); }
+                    Err(_) => {
+                        yield Err(ProviderError::Status(400, "API key contains characters that can't be sent in an HTTP header".to_string()));
+                        return;
+                    }
+                }
             }
             headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
@@ -100,8 +119,8 @@ impl ModelProvider for HordeProvider {
             };
 
             let url = format!("{}/generate/text/async", base);
-            
-            let client = reqwest::Client::new();
+
+            let client = http_client;
             let response = client
                 .post(url)
                 .headers(headers.clone())
@@ -133,9 +152,15 @@ impl ModelProvider for HordeProvider {
             };
 
             let status_url = format!("{}/generate/text/status/{}", base, init.id);
-            
+            let poll_start = tokio::time::Instant::now();
+
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+                if poll_start.elapsed() > MAX_POLL_DURATION {
+                    yield Err(ProviderError::Status(504, "Horde generation timed out waiting for a worker to pick up the job".to_string()));
+                    return;
+                }
+
+                tokio::time::sleep(POLL_INTERVAL).await;
 
                 let res = client.get(&status_url).headers(headers.clone()).send().await;
                 let res = match res {

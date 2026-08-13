@@ -278,6 +278,7 @@ pub(crate) fn run_group_generation(
             };
 
             let mut provider_stream = prepared.provider.stream_completion(
+                state.http_client.clone(),
                 prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling,
             ).await;
 
@@ -396,7 +397,7 @@ pub(crate) async fn run_generation(
 
     let provider_stream = prepared
         .provider
-        .stream_completion(prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
+        .stream_completion(state.http_client.clone(), prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
         .await;
 
     let writer = state.db.writer.clone();

@@ -88,6 +88,7 @@ pub struct GeminiProvider;
 impl ModelProvider for GeminiProvider {
     async fn stream_completion(
         &self,
+        http_client: reqwest::Client,
         base_url: String,
         api_key: String,
         model: String,
@@ -169,7 +170,7 @@ impl ModelProvider for GeminiProvider {
 
             let url = format!("{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}", base, model, api_key);
 
-            let client = reqwest::Client::new();
+            let client = http_client;
             let response = client
                 .post(url)
                 .headers(headers)

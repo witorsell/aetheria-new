@@ -57,6 +57,7 @@ pub struct AnthropicProvider;
 impl ModelProvider for AnthropicProvider {
     async fn stream_completion(
         &self,
+        http_client: reqwest::Client,
         base_url: String,
         api_key: String,
         model: String,
@@ -64,9 +65,9 @@ impl ModelProvider for AnthropicProvider {
         sampling: crate::provider::SamplingParams,
     ) -> Pin<Box<dyn futures_util::Stream<Item = Result<String, ProviderError>> + Send>> {
 
-        let mut anthropic_messages = Vec::new();
+        let mut anthropic_messages: Vec<AnthropicMessage> = Vec::new();
         let mut system_prompt = String::new();
-        
+
         for msg in messages {
             if msg.role == Role::System {
                 if system_prompt.is_empty() {
@@ -76,19 +77,30 @@ impl ModelProvider for AnthropicProvider {
                     system_prompt.push_str(&msg.content);
                 }
             } else {
-                // roles can only be 'user' or 'assistant'. 
+                // roles can only be 'user' or 'assistant'.
                 // any 'system' roles that come later should just be 'user'.
                 // but in our build_messages, system is only at the beginning.
-                anthropic_messages.push(AnthropicMessage {
-                    role: msg.role.as_str().to_string(),
-                    content: msg.content.clone(),
-                });
+                //
+                // claude requires strict user/assistant alternation starting
+                // with user and rejects a request with two consecutive
+                // same-role turns outright - and build_messages can
+                // legitimately produce those (e.g. a preset's own role="user"
+                // prompt injections landing next to each other, or next to
+                // the real user turn). merge into the previous turn instead
+                // of trusting the assembled order to already alternate,
+                // mirroring how the Gemini provider handles the same
+                // requirement.
+                let role = msg.role.as_str().to_string();
+                if let Some(last) = anthropic_messages.last_mut() {
+                    if last.role == role {
+                        last.content.push_str("\n\n");
+                        last.content.push_str(&msg.content);
+                        continue;
+                    }
+                }
+                anthropic_messages.push(AnthropicMessage { role, content: msg.content });
             }
         }
-        
-        // claude requires alternating user/assistant messages starting with user.
-        // for now, we'll just send them directly as build_messages should have formatted it nicely.
-        // if there are issues, we might need a compaction pass.
 
         // extended thinking won't take temperature/top_p/top_k in the same
         // request, and max_tokens has to leave room past the thinking budget
@@ -126,10 +138,18 @@ impl ModelProvider for AnthropicProvider {
         Box::pin(async_stream::stream! {
             let mut headers = HeaderMap::new();
             headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-            if let Ok(key) = HeaderValue::from_str(&api_key) {
-                headers.insert("x-api-key", key);
-            }
-            
+            let key_header = match HeaderValue::from_str(&api_key) {
+                Ok(key) => key,
+                Err(_) => {
+                    // silently skipping this used to send an unauthenticated
+                    // request instead - a confusing 401 from Anthropic rather
+                    // than a clear local error about the key itself
+                    yield Err(ProviderError::Status(400, "API key contains characters that can't be sent in an HTTP header".to_string()));
+                    return;
+                }
+            };
+            headers.insert("x-api-key", key_header);
+
             let url = if base_url.ends_with("/messages") {
                 base_url.clone()
             } else if base_url.ends_with("/") {
@@ -138,7 +158,7 @@ impl ModelProvider for AnthropicProvider {
                 format!("{}/v1/messages", base_url)
             };
 
-            let client = reqwest::Client::new();
+            let client = http_client;
             let response = client
                 .post(url)
                 .headers(headers)

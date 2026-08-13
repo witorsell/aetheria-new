@@ -34,6 +34,7 @@ pub struct NovelProvider;
 impl ModelProvider for NovelProvider {
     async fn stream_completion(
         &self,
+        http_client: reqwest::Client,
         base_url: String,
         api_key: String,
         model: String,
@@ -69,14 +70,21 @@ impl ModelProvider for NovelProvider {
 
         Box::pin(async_stream::stream! {
             let mut headers = HeaderMap::new();
-            if let Ok(key) = HeaderValue::from_str(&format!("Bearer {}", api_key)) {
-                headers.insert("Authorization", key);
-            }
+            let auth_header = match HeaderValue::from_str(&format!("Bearer {}", api_key)) {
+                Ok(key) => key,
+                Err(_) => {
+                    // silently skipping this used to send an unauthenticated
+                    // request instead of a clear local error about the key
+                    yield Err(ProviderError::Status(400, "API key contains characters that can't be sent in an HTTP header".to_string()));
+                    return;
+                }
+            };
+            headers.insert("Authorization", auth_header);
             headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
             let url = format!("{}/ai/generate-stream", base_url.trim_end_matches('/'));
-            
-            let client = reqwest::Client::new();
+
+            let client = http_client;
             let response = client
                 .post(url)
                 .headers(headers)

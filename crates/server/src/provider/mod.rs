@@ -219,6 +219,7 @@ use std::pin::Pin;
 pub trait ModelProvider: Send + Sync {
     async fn stream_completion(
         &self,
+        http_client: reqwest::Client,
         base_url: String,
         api_key: String,
         model: String,
@@ -233,6 +234,7 @@ pub struct OpenAIProvider;
 impl ModelProvider for OpenAIProvider {
     async fn stream_completion(
         &self,
+        http_client: reqwest::Client,
         base_url: String,
         api_key: String,
         model: String,
@@ -240,7 +242,7 @@ impl ModelProvider for OpenAIProvider {
         sampling: SamplingParams,
     ) -> Pin<Box<dyn futures_util::Stream<Item = Result<String, ProviderError>> + Send>> {
         Box::pin(async_stream::stream! {
-        let client = reqwest::Client::new();
+        let client = http_client;
         let response = client
             .post(format!("{base_url}/chat/completions"))
             .bearer_auth(api_key)
@@ -449,7 +451,7 @@ mod streaming_tests {
 
     async fn collect_stream(base_url: String) -> String {
         let provider = OpenAIProvider;
-        let stream = provider.stream_completion(base_url, "key".to_string(), "model".to_string(), vec![], SamplingParams::default()).await;
+        let stream = provider.stream_completion(reqwest::Client::new(), base_url, "key".to_string(), "model".to_string(), vec![], SamplingParams::default()).await;
         let pieces: Vec<String> =
             stream.map(|r| r.expect("stream should not error")).collect().await;
         pieces.concat()
