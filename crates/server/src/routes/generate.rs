@@ -372,10 +372,10 @@ pub async fn generate_character_field(Extension(user_id): Extension<i64>,
     let settings = crate::models::settings::get_view(&state.db.read_pool, user_id).await?;
     let api_key = crate::models::settings::get_decrypted_api_key(&state.db.read_pool, user_id, &state.encryption_key).await?;
 
-    let provider = resolve_provider(&settings.provider_type)?;
+    let provider = resolve_provider(&settings.provider.provider_type)?;
 
     let sampling = settings.sampling_params();
-    let provider_stream = provider.stream_completion(state.http_client.clone(), settings.api_base_url, api_key, settings.model_name, messages, sampling).await;
+    let provider_stream = provider.stream_completion(state.http_client.clone(), settings.provider.api_base_url, api_key, settings.provider.model_name, messages, sampling).await;
 
     let sse_stream = provider_stream.map(|item| match item {
         Ok(delta) => Ok(Event::default().data(delta)),

@@ -181,14 +181,14 @@ pub(crate) async fn assemble_generation(
     });
     let raw_prompt = serde_json::to_string(&messages).unwrap_or_default();
     let prompt_tokens = estimate_message_tokens(&messages) as i64;
-    let provider = resolve_provider(&settings.provider_type)?;
+    let provider = resolve_provider(&settings.provider.provider_type)?;
     let sampling = settings.sampling_params();
 
     Ok(PreparedGeneration {
         provider,
-        api_base_url: settings.api_base_url,
+        api_base_url: settings.provider.api_base_url,
         api_key,
-        model_name: settings.model_name,
+        model_name: settings.provider.model_name,
         sampling,
         messages,
         raw_prompt,

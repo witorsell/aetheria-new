@@ -141,18 +141,18 @@ pub async fn list_models(
     Query(params): Query<ListModelsParams>,
 ) -> Result<Json<Vec<ModelListItem>>, ApiError> {
     let view = crate::models::settings::get_view(&state.db.read_pool, user_id).await?;
-    if view.api_base_url.is_empty() {
+    if view.provider.api_base_url.is_empty() {
         return Err(ApiError::bad_request("API base URL is not set"));
     }
-    if !view.has_api_key {
+    if !view.provider.has_api_key {
         return Err(ApiError::bad_request("API key is not set"));
     }
     let api_key = crate::models::settings::get_decrypted_api_key(&state.db.read_pool, user_id, &state.encryption_key).await?;
 
     let url = if params.subscription_only {
-        subscription_models_url(&view.api_base_url)
+        subscription_models_url(&view.provider.api_base_url)
     } else {
-        format!("{}/models", view.api_base_url.trim_end_matches('/'))
+        format!("{}/models", view.provider.api_base_url.trim_end_matches('/'))
     };
     let mut request = state.http_client.get(url);
     if !api_key.is_empty() {
@@ -164,7 +164,7 @@ pub async fn list_models(
         .await
         .map_err(|e| {
             tracing::warn!(error = %e, "provider models list request failed");
-            ApiError::new(502, format!("could not reach {}: {}", view.api_base_url, e))
+            ApiError::new(502, format!("could not reach {}: {}", view.provider.api_base_url, e))
         })?;
     if !response.status().is_success() {
         let status = response.status();

@@ -94,34 +94,53 @@ fn default_top_p() -> f64 {
     1.0
 }
 
+// grouped so SettingsView doesn't read as one flat bag of every toggle -
+// each nested struct still flattens back into the same top-level JSON keys
+// (via #[serde(flatten)] + per-field renames), so the wire shape the
+// frontend deserializes is byte-identical to the pre-grouping one.
 #[derive(Serialize)]
-pub struct SettingsView {
-    pub user_id: i64,
+pub struct ProviderSettings {
     pub api_base_url: String,
-    pub model_name: String,
-    pub system_prompt: String,
     pub has_api_key: bool,
-    pub context_limit: i64,
-    pub post_history_instructions: String,
-    pub forbid_external_media: bool,
+    pub model_name: String,
     pub provider_type: String,
-    pub active_preset_id: Option<String>,
-    // empty/unset fields fall back to the main provider settings, see
-    // get_summary_config. summary_context_limit None = inherit main limit
-    pub summary_provider_type: String,
-    pub summary_api_base_url: String,
-    pub has_summary_api_key: bool,
-    pub summary_model_name: String,
-    pub summary_context_limit: Option<i64>,
-    // "" = off, "local" = free on-server model, "api" = OpenAI-compatible
-    // /embeddings endpoint (model name has no fallback, unlike base_url/key)
-    pub embedding_source: String,
-    pub embedding_api_base_url: String,
-    pub has_embedding_api_key: bool,
-    pub embedding_model_name: String,
+}
+
+// empty/unset fields fall back to the main provider settings, see
+// get_summary_config. context_limit None = inherit main limit
+#[derive(Serialize)]
+pub struct SummarySettings {
+    #[serde(rename = "summary_provider_type")]
+    pub provider_type: String,
+    #[serde(rename = "summary_api_base_url")]
+    pub api_base_url: String,
+    #[serde(rename = "has_summary_api_key")]
+    pub has_api_key: bool,
+    #[serde(rename = "summary_model_name")]
+    pub model_name: String,
+    #[serde(rename = "summary_context_limit")]
+    pub context_limit: Option<i64>,
+}
+
+// source: "" = off, "local" = free on-server model, "api" = OpenAI-compatible
+// /embeddings endpoint (model name has no fallback, unlike base_url/key)
+#[derive(Serialize)]
+pub struct MemorySettings {
+    #[serde(rename = "embedding_source")]
+    pub source: String,
+    #[serde(rename = "embedding_api_base_url")]
+    pub api_base_url: String,
+    #[serde(rename = "has_embedding_api_key")]
+    pub has_api_key: bool,
+    #[serde(rename = "embedding_model_name")]
+    pub model_name: String,
     pub rag_top_k: i64,
     pub rag_score_threshold: f64,
-    // top_k 0 = don't send it, same for frequency/presence_penalty/max_response_tokens
+}
+
+// top_k 0 = don't send it, same for frequency/presence_penalty/max_response_tokens
+#[derive(Serialize)]
+pub struct SamplingSettings {
     pub temperature: f64,
     pub top_p: f64,
     pub top_k: i64,
@@ -131,19 +150,38 @@ pub struct SettingsView {
     pub reasoning_effort: String,
 }
 
+#[derive(Serialize)]
+pub struct SettingsView {
+    pub user_id: i64,
+    #[serde(flatten)]
+    pub provider: ProviderSettings,
+    pub system_prompt: String,
+    pub context_limit: i64,
+    pub post_history_instructions: String,
+    pub forbid_external_media: bool,
+    pub active_preset_id: Option<String>,
+    #[serde(flatten)]
+    pub summary: SummarySettings,
+    #[serde(flatten)]
+    pub memory: MemorySettings,
+    #[serde(flatten)]
+    pub sampling: SamplingSettings,
+}
+
 impl SettingsView {
     pub fn sampling_params(&self) -> crate::provider::SamplingParams {
         let reasoning_effort = self
+            .sampling
             .reasoning_effort
             .parse::<crate::provider::ReasoningEffort>()
             .unwrap_or_default();
         crate::provider::SamplingParams {
-            temperature: self.temperature,
-            top_p: self.top_p,
-            top_k: self.top_k,
-            frequency_penalty: self.frequency_penalty,
-            presence_penalty: self.presence_penalty,
-            max_tokens: self.max_response_tokens,
+            temperature: self.sampling.temperature,
+            top_p: self.sampling.top_p,
+            top_k: self.sampling.top_k,
+            frequency_penalty: self.sampling.frequency_penalty,
+            presence_penalty: self.sampling.presence_penalty,
+            max_tokens: self.sampling.max_response_tokens,
             reasoning_effort,
         }
     }
@@ -187,34 +225,43 @@ pub async fn get_view(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<Set
         .fetch_one(pool)
         .await?;
 
-    Ok(SettingsView { user_id,
-        api_base_url: row.api_base_url,
-        model_name: row.model_name,
+    Ok(SettingsView {
+        user_id,
+        provider: ProviderSettings {
+            api_base_url: row.api_base_url,
+            has_api_key: !row.api_key.is_empty(),
+            model_name: row.model_name,
+            provider_type: row.provider_type,
+        },
         system_prompt: row.system_prompt,
-        has_api_key: !row.api_key.is_empty(),
         context_limit: row.context_limit,
         post_history_instructions: row.post_history_instructions,
         forbid_external_media: row.forbid_external_media,
-        provider_type: row.provider_type,
         active_preset_id: row.active_preset_id,
-        summary_provider_type: row.summary_provider_type,
-        summary_api_base_url: row.summary_api_base_url,
-        has_summary_api_key: !row.summary_api_key.is_empty(),
-        summary_model_name: row.summary_model_name,
-        summary_context_limit: row.summary_context_limit,
-        embedding_source: row.embedding_source,
-        embedding_api_base_url: row.embedding_api_base_url,
-        has_embedding_api_key: !row.embedding_api_key.is_empty(),
-        embedding_model_name: row.embedding_model_name,
-        rag_top_k: row.rag_top_k,
-        rag_score_threshold: row.rag_score_threshold,
-        temperature: row.temperature,
-        top_p: row.top_p,
-        top_k: row.top_k,
-        frequency_penalty: row.frequency_penalty,
-        presence_penalty: row.presence_penalty,
-        max_response_tokens: row.max_response_tokens,
-        reasoning_effort: row.reasoning_effort,
+        summary: SummarySettings {
+            provider_type: row.summary_provider_type,
+            api_base_url: row.summary_api_base_url,
+            has_api_key: !row.summary_api_key.is_empty(),
+            model_name: row.summary_model_name,
+            context_limit: row.summary_context_limit,
+        },
+        memory: MemorySettings {
+            source: row.embedding_source,
+            api_base_url: row.embedding_api_base_url,
+            has_api_key: !row.embedding_api_key.is_empty(),
+            model_name: row.embedding_model_name,
+            rag_top_k: row.rag_top_k,
+            rag_score_threshold: row.rag_score_threshold,
+        },
+        sampling: SamplingSettings {
+            temperature: row.temperature,
+            top_p: row.top_p,
+            top_k: row.top_k,
+            frequency_penalty: row.frequency_penalty,
+            presence_penalty: row.presence_penalty,
+            max_response_tokens: row.max_response_tokens,
+            reasoning_effort: row.reasoning_effort,
+        },
     })
 }
 
