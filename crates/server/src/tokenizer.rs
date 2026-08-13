@@ -1,11 +1,11 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-#[cfg(feature = "local-embeddings")]
+#[cfg(feature = "gpt2-tokenizer")]
 use tokenizers::models::bpe::BPE;
-#[cfg(feature = "local-embeddings")]
+#[cfg(feature = "gpt2-tokenizer")]
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
-#[cfg(feature = "local-embeddings")]
+#[cfg(feature = "gpt2-tokenizer")]
 use tokenizers::Tokenizer;
 
 /// bundled file (carried over from old aetheria's assets) is a raw gpt2
@@ -21,10 +21,10 @@ fn to_ahash_map(vocab: HashMap<String, u32>) -> ahash::AHashMap<String, u32> {
     vocab.into_iter().collect()
 }
 
-#[cfg(feature = "local-embeddings")]
+#[cfg(feature = "gpt2-tokenizer")]
 static TOKENIZER: OnceLock<Tokenizer> = OnceLock::new();
 
-#[cfg(feature = "local-embeddings")]
+#[cfg(feature = "gpt2-tokenizer")]
 fn tokenizer() -> &'static Tokenizer {
     TOKENIZER.get_or_init(|| {
         let bundled: BundledVocab = serde_json::from_slice(include_bytes!("../assets/gpt2_tokenizer.json"))
@@ -67,13 +67,14 @@ fn estimate_fallback_tokens(text: &str) -> usize {
     (tokens.round() as usize).max(1)
 }
 
-/// real BPE token count instead of the old chars/4 guess when local-embeddings
-/// is enabled; falls back to an enhanced multi-script token estimator when disabled.
+/// real BPE token count instead of the old chars/4 guess when gpt2-tokenizer
+/// is enabled (on by default); falls back to an enhanced multi-script token
+/// estimator when disabled.
 pub fn count_tokens(text: &str) -> usize {
     if text.is_empty() {
         return 0;
     }
-    #[cfg(feature = "local-embeddings")]
+    #[cfg(feature = "gpt2-tokenizer")]
     {
         if let Ok(encoding) = tokenizer().encode(text, false) {
             return encoding.len();

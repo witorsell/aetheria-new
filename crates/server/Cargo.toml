@@ -12,7 +12,17 @@ name = "server"
 path = "src/main.rs"
 
 [features]
-default = []
+# gpt2-tokenizer is a real dependency (the `tokenizers` crate) but a cheap
+# one: pure Rust, no network call, no model download - the vocab/merges are
+# bundled at compile time (assets/gpt2_tokenizer.json). on by default so the
+# plain `cargo build --release -p server` the README documents actually gets
+# the real BPE token count it advertises, not the fallback estimator.
+# local-embeddings pulls in the full candle ML stack plus a real model
+# downloaded from HuggingFace on first use - genuinely heavy, so it stays
+# opt-in - but also needs `tokenizers` for the embedding model's own
+# tokenizer, a separate use from the bundled GPT-2 one.
+default = ["gpt2-tokenizer"]
+gpt2-tokenizer = ["dep:tokenizers"]
 local-embeddings = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:hf-hub"]
 
 [dependencies]
