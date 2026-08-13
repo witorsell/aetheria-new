@@ -31,6 +31,13 @@ pub async fn list_for_character(pool: &sqlx::SqlitePool, user_id: i64, character
     .await
 }
 
+pub async fn list_all(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<Vec<Chat>> {
+    sqlx::query_as::<_, Chat>("SELECT * FROM chats WHERE user_id = ? ORDER BY created_at ASC")
+        .bind(user_id)
+        .fetch_all(pool)
+        .await
+}
+
 pub async fn get(pool: &sqlx::SqlitePool, user_id: i64, id: &str) -> sqlx::Result<Option<Chat>> {
     sqlx::query_as::<_, Chat>("SELECT * FROM chats WHERE id = ? AND user_id = ?")
         .bind(id)
