@@ -12,6 +12,7 @@ const MAX_THEME_NAME: usize = 256;
 const MAX_CUSTOM_CSS: usize = 100_000;
 
 const AT_IMPORT_WARNING: &str = "The imported theme's custom CSS contained an @import rule, which was removed. @import can be used to load external stylesheets that track or fingerprint you.";
+const EXTERNAL_URL_WARNING: &str = "The imported theme's custom CSS referenced an external url(), which was removed. A url() pointing off-site (background-image, @font-face src, cursor, etc.) can be used as a tracking pixel the same way @import can.";
 
 fn at_import_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -44,12 +45,42 @@ fn strip_at_import(css: &str) -> (String, bool) {
     (current.trim().to_string(), stripped_anything)
 }
 
-/// validates name/CSS-length limits and strips `@import` out of `tokens.custom_css`
-/// in place. runs uniformly for every path a theme can be created or updated
-/// through (create, update, the plain import, the SillyTavern import), so the
-/// same untrusted-file threat model gets the same treatment everywhere instead
-/// of only where someone remembered to add it. returns a warning if anything
-/// was actually stripped.
+fn external_url_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // @import isn't the only way custom CSS can reach off-site: a plain
+    // url() in an ordinary property value (background-image, @font-face
+    // src, cursor, list-style-image, ...) fetches just as eagerly and is
+    // just as usable as a tracking pixel. matches url(...) whose target -
+    // after an optional quote and optional http(s): scheme - starts with
+    // // (i.e. it's protocol-relative or an absolute http/https URL), so a
+    // local/relative path or a self-contained data: URI is left untouched.
+    RE.get_or_init(|| Regex::new(r#"(?i)url\(\s*['"]?\s*(?:https?:)?//[^)]*\)"#).unwrap())
+}
+
+/// same fixed-point-iteration reasoning as strip_at_import: a single pass
+/// can be defeated by a payload whose leftover pieces reform a live url()
+/// once the matched substring is cut out.
+fn strip_external_urls(css: &str) -> (String, bool) {
+    let re = external_url_regex();
+    let mut current = css.to_string();
+    let mut stripped_anything = false;
+    loop {
+        let next = re.replace_all(&current, "url()").into_owned();
+        if next == current {
+            break;
+        }
+        stripped_anything = true;
+        current = next;
+    }
+    (current.trim().to_string(), stripped_anything)
+}
+
+/// validates name/CSS-length limits and strips `@import` and any external
+/// `url()` out of `tokens.custom_css` in place. runs uniformly for every
+/// path a theme can be created or updated through (create, update, the
+/// plain import, the SillyTavern import), so the same untrusted-file threat
+/// model gets the same treatment everywhere instead of only where someone
+/// remembered to add it. returns a warning if anything was actually stripped.
 fn validate(name: &str, tokens: &mut ThemeTokens) -> Result<Option<String>, ApiError> {
     if name.trim().is_empty() {
         return Err(ApiError::bad_request("Name cannot be empty"));
@@ -60,9 +91,18 @@ fn validate(name: &str, tokens: &mut ThemeTokens) -> Result<Option<String>, ApiE
     if tokens.custom_css.len() > MAX_CUSTOM_CSS {
         return Err(ApiError::bad_request("Custom CSS too long (max 100,000 characters)"));
     }
-    let (cleaned, stripped) = strip_at_import(&tokens.custom_css);
+    let (cleaned, stripped_import) = strip_at_import(&tokens.custom_css);
+    let (cleaned, stripped_url) = strip_external_urls(&cleaned);
     tokens.custom_css = cleaned;
-    Ok(stripped.then(|| AT_IMPORT_WARNING.to_string()))
+
+    let mut warnings = Vec::new();
+    if stripped_import {
+        warnings.push(AT_IMPORT_WARNING);
+    }
+    if stripped_url {
+        warnings.push(EXTERNAL_URL_WARNING);
+    }
+    Ok((!warnings.is_empty()).then(|| warnings.join(" ")))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,7 +169,7 @@ pub async fn create(
     Json(mut input): Json<CreateThemeInput>,
 ) -> Result<Json<Theme>, ApiError> {
     if validate(&input.name, &mut input.tokens)?.is_some() {
-        tracing::warn!(user_id, "@import stripped from theme custom_css on create");
+        tracing::warn!(user_id, "@import and/or external url() stripped from theme custom_css on create");
     }
     let theme = state.db.writer.create_theme(user_id, input.name, input.tokens).await?;
     Ok(Json(theme))
@@ -142,7 +182,7 @@ pub async fn update(
     Json(mut input): Json<CreateThemeInput>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     if validate(&input.name, &mut input.tokens)?.is_some() {
-        tracing::warn!(user_id, "@import stripped from theme custom_css on update");
+        tracing::warn!(user_id, "@import and/or external url() stripped from theme custom_css on update");
     }
     let updated = state.db.writer.update_theme(user_id, id, input.name, input.tokens).await?;
     Ok(if updated { axum::http::StatusCode::OK } else { axum::http::StatusCode::NOT_FOUND })
@@ -327,5 +367,64 @@ mod tests {
         let warning = validate("My Theme", &mut tokens).unwrap();
         assert!(warning.is_none());
         assert_eq!(tokens.custom_css, ".foo { color: red; }");
+    }
+
+    #[test]
+    fn strips_external_url_in_an_ordinary_property_value() {
+        // @import isn't the only door - a plain url() in background-image,
+        // @font-face src, cursor, etc. fetches just as eagerly
+        let (css, stripped) = strip_external_urls(".foo { background-image: url('https://evil.example/track.png'); }");
+        assert!(stripped);
+        assert!(!css.contains("evil.example"));
+        assert!(css.contains(".foo"));
+    }
+
+    #[test]
+    fn strips_protocol_relative_external_url() {
+        let (css, stripped) = strip_external_urls("@font-face { src: url(//evil.example/font.woff2); }");
+        assert!(stripped);
+        assert!(!css.contains("evil.example"));
+    }
+
+    #[test]
+    fn strips_uppercase_external_url() {
+        let (css, stripped) = strip_external_urls(".foo { cursor: URL(\"HTTPS://evil.example/x.png\"), pointer; }");
+        assert!(stripped);
+        assert!(!css.to_ascii_lowercase().contains("evil.example"));
+    }
+
+    #[test]
+    fn leaves_data_uri_and_relative_urls_alone() {
+        let css_in = ".a { background: url(data:image/png;base64,AAAA); } .b { background: url(/local/pic.png); } .c { background: url(pic.png); }";
+        let (css, stripped) = strip_external_urls(css_in);
+        assert!(!stripped, "data: URIs and local/relative paths aren't a tracking vector and must survive untouched");
+        assert_eq!(css, css_in);
+    }
+
+    #[test]
+    fn does_not_claim_a_url_strip_when_nothing_was_there() {
+        let (css, stripped) = strip_external_urls(".foo { color: red; }");
+        assert!(!stripped);
+        assert_eq!(css, ".foo { color: red; }");
+    }
+
+    #[test]
+    fn validate_strips_external_url_via_the_shared_path() {
+        let mut tokens = theme::default_theme_tokens();
+        tokens.custom_css = ".foo { background-image: url('https://evil.example/track.png'); }".to_string();
+        let warning = validate("My Theme", &mut tokens).unwrap();
+        assert!(warning.is_some());
+        assert!(!tokens.custom_css.contains("evil.example"));
+    }
+
+    #[test]
+    fn validate_combines_warnings_when_both_import_and_url_are_present() {
+        let mut tokens = theme::default_theme_tokens();
+        tokens.custom_css =
+            "@import url('https://evil.example/a.css'); .foo { background: url('https://evil.example/b.png'); }".to_string();
+        let warning = validate("My Theme", &mut tokens).unwrap().unwrap();
+        assert!(warning.contains("@import"));
+        assert!(warning.contains("url()"));
+        assert!(!tokens.custom_css.contains("evil.example"));
     }
 }
