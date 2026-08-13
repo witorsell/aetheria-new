@@ -4,8 +4,11 @@ use candle_transformers::models::nomic_bert::{l2_normalize, mean_pooling, Config
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 
 /// nomic-embed-text-v1.5, same model old aetheria's srv/embedding/local.ts
-/// used server-side. retrieval-tuned (not a generic MiniLM-type model),
-/// 8192 token window since chat messages blow past 512 tokens constantly.
+/// used server-side. retrieval-tuned (not a generic MiniLM-type model).
+/// the model itself supports up to 8192 tokens, but MAX_TOKENS below caps
+/// input at 2048 - chat messages routinely blow past a smaller window like
+/// 512, so this still comfortably covers normal messages without paying
+/// full 8192-token CPU inference cost on every embed call.
 /// downloaded once from HF, cached in the usual hf-hub dir, free after that
 const MODEL_REPO: &str = "nomic-ai/nomic-embed-text-v1.5";
 const MAX_TOKENS: usize = 2048;
