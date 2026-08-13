@@ -48,7 +48,14 @@ if [ ! -f .env ]; then
   log "generating .env with a fresh session secret and encryption key"
   cp .env.example .env
   SESSION_SECRET=$(openssl rand -base64 64 | tr -d '\n')
-  ENCRYPTION_KEY=$(openssl rand -hex 16) # 16 bytes -> 32 hex chars, the key must be exactly 32 bytes
+  # the code takes this string's raw UTF-8 bytes as the literal AES-256 key,
+  # not a hex/base64 decode of it - so hex-encoding N random bytes into a
+  # 32-char string only ever carries N*8 bits of real entropy (e.g. 16 random
+  # bytes hex-encoded to 32 chars = 128 bits, half of what AES-256 wants).
+  # pulling 32 chars straight from an 62-symbol alphabet instead gives each
+  # character close to a full 6 bits of its own, ~190 bits total, and stays
+  # alphanumeric so nothing needs escaping in .env or the shell.
+  ENCRYPTION_KEY=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)
   # portable in-place sed for both GNU and BSD/macOS sed
   sed -i.bak "s#^AETHERIA_SESSION_SECRET=.*#AETHERIA_SESSION_SECRET=${SESSION_SECRET}#" .env
   sed -i.bak "s#^AETHERIA_ENCRYPTION_KEY=.*#AETHERIA_ENCRYPTION_KEY=${ENCRYPTION_KEY}#" .env

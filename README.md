@@ -204,8 +204,10 @@ Copy `.env.example` to `.env` and fill in your keys:
 ```bash
 cp .env.example .env
 openssl rand -base64 64  # session secret
-openssl rand -hex 16     # encryption key - must be exactly 32 characters
+LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32  # encryption key - exactly 32 characters
 ```
+
+The encryption key is used as literal key bytes, not decoded from hex/base64, so it needs to actually be 32 random characters rather than a hex encoding of fewer random bytes (which would only carry half the intended entropy).
 
 ### Run
 
