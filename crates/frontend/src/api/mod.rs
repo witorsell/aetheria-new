@@ -1,3 +1,4 @@
+mod account;
 mod characters;
 mod chats;
 mod core;
@@ -8,6 +9,7 @@ mod regex_scripts;
 mod settings;
 mod themes;
 
+pub use account::*;
 pub use characters::*;
 pub use chats::*;
 pub use core::*;
