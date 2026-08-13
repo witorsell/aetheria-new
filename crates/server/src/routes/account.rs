@@ -48,3 +48,12 @@ pub async fn delete_all(
 
     Ok(StatusCode::OK)
 }
+
+pub async fn import_all(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    Json(export): Json<crate::models::account::AccountExport>,
+) -> Result<StatusCode, ApiError> {
+    state.db.writer.import_all_account_content(user_id, export).await?;
+    Ok(StatusCode::OK)
+}
