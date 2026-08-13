@@ -16,6 +16,14 @@ This is the Rust rewrite of Aetheria, my old fork of Agnaistic, into a high-perf
 
 Aetheria is an in-progress local roleplay/chat interface. It keeps everything in a local SQLite DB so nothing goes anywhere except the actual LLM API calls. One binary, one process, no node_modules.
 
+## One-click deploy
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/witorsell/aetheria-new/main/install.sh | bash
+```
+
+Clones (or updates) the repo, installs Rust/Trunk if missing, generates a `.env` with fresh secrets on first run, builds both the frontend and server in release mode, and starts it (under pm2 if it's installed, foreground otherwise). Details on every step, plus manual setup, are further down in [Getting started](#getting-started).
+
 ## Why I made it
 
 I'm a primarily mobile user, and I tried a bunch of the cloud options out there. Started on Agnaistic, ran into some issues, so I forked it to fix them. That turned into more and more modifications, but something always felt off, it didn't feel like mine because it was someone else's foundation.
@@ -25,6 +33,7 @@ Switched to SillyTavern after seeing all the positive opinions on it, but it was
 So here we are.
 
 ## Recent updates
+- One-click install script, and `chat.rs`/`SettingsView` split into smaller focused modules for easier maintenance going forward (Aug 13)
 - Full theme system: SillyTavern-style token editor with instant live preview, import/export (including direct SillyTavern theme file import), plus a redesigned default look and a mascot (Aug 12)
 - Group chats with multiple activation strategies (List, Natural) and per-character talkativeness (Aug 6-7)
 - Character card import/export as SillyTavern-compatible PNG cards (Aug 5-6)
@@ -195,7 +204,7 @@ Copy `.env.example` to `.env` and fill in your keys:
 ```bash
 cp .env.example .env
 openssl rand -base64 64  # session secret
-openssl rand -hex 32     # encryption key
+openssl rand -hex 16     # encryption key - must be exactly 32 characters
 ```
 
 ### Run
