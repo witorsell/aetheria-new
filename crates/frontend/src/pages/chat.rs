@@ -1,24 +1,26 @@
 use leptos::html::Ul;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos_router::NavigateOptions;
 use leptos_router::hooks::{use_navigate, use_params_map};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::collections::HashSet;
 
-use super::chat_helpers::{Thought, RawPromptPanel, walk_active_branch, regeneration_parent_id, speaker_for};
+use super::chat_actions::{
+    build_delete, build_delete_all_below, build_save_edit, build_select_branch_point,
+    build_select_sibling, build_toggle_visibility,
+};
+use super::chat_data::build_fetch_tree;
+use super::chat_generation::{build_continue_gen, build_regenerate, build_respond_as_me, build_send};
+use super::chat_helpers::{Thought, RawPromptPanel, walk_active_branch, speaker_for};
+use super::chat_state::ChatSignals;
 
 #[component]
 pub fn ChatPage() -> impl IntoView {
     let params = use_params_map();
     let chat_id = Memo::new(move |_| params.with(|p| p.get("id").unwrap_or_default()));
     let navigate = use_navigate();
-    let navigate_send = navigate.clone();
-    let navigate_regen = navigate.clone();
-    let navigate_continue = navigate.clone();
-    let navigate_self = navigate.clone();
 
     let (tree, set_tree) = signal(crate::api::MessageTree::default());
     let (chat_meta, set_chat_meta) = signal(Option::<crate::api::Chat>::None);
@@ -34,90 +36,7 @@ pub fn ChatPage() -> impl IntoView {
             .collect::<HashMap<String, crate::api::Character>>()
     });
     
-    let fetch_tree = {
-        let id_for_fetch = chat_id.clone();
-        move || {
-            let id = id_for_fetch.get();
-            spawn_local(async move {
-                let mut was_at_bottom = false;
-                if let Some(window) = web_sys::window() {
-                    if let Some(doc) = window.document() {
-                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                            let scroll_top = el.scroll_top();
-                            let client_height = el.client_height();
-                            let scroll_height = el.scroll_height();
-                            if scroll_height - (scroll_top + client_height) < 150 {
-                                was_at_bottom = true;
-                            }
-                        }
-                    }
-                }
-
-                let mut tree_data = match crate::api::list_messages(&id).await {
-                    Ok(t) => t,
-                    Err(_) => {
-                        let mut t = crate::api::MessageTree::default();
-                        if let Ok(branch_data) = crate::api::active_branch(&id).await {
-                            let mut msgs: HashMap<String, crate::api::MessageNode> = HashMap::new();
-                            let mut root_id = None;
-                            let mut prev_id: Option<String> = None;
-                            for msg in &branch_data {
-                                if msg.parent_id.is_none() {
-                                    root_id = Some(msg.id.clone());
-                                }
-                                if let Some(pid) = &prev_id {
-                                    if let Some(parent) = msgs.get_mut(pid) {
-                                        if !parent.children.contains(&msg.id) {
-                                            parent.children.push(msg.id.clone());
-                                        }
-                                    }
-                                }
-                                msgs.insert(msg.id.clone(), msg.clone());
-                                prev_id = Some(msg.id.clone());
-                            }
-                            t.root_id = root_id;
-                            t.messages = msgs;
-                        }
-                        t
-                    }
-                };
-
-                if let Ok(chat) = crate::api::get_chat(&id).await {
-                    set_chat_meta.set(Some(chat.clone()));
-
-                    if tree_data.character.is_none() {
-                        if let Some(cid) = &chat.character_id {
-                            if let Ok(c) = crate::api::get_character(cid).await {
-                                tree_data.character = Some(c);
-                            }
-                        }
-                    }
-                    if tree_data.group.is_none() {
-                        if let Some(gid) = &chat.group_id {
-                            if let Ok(gwm) = crate::api::get_group(gid).await {
-                                tree_data.group = Some(gwm);
-                            }
-                        }
-                    }
-                }
-
-                set_tree.set(tree_data);
-
-                if was_at_bottom {
-                    leptos::task::spawn_local(async move {
-                        gloo_timers::future::TimeoutFuture::new(50).await;
-                        if let Some(window) = web_sys::window() {
-                            if let Some(doc) = window.document() {
-                                if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                    el.set_scroll_top(el.scroll_height());
-                                }
-                            }
-                        }
-                    });
-                }
-            });
-        }
-    };
+    let fetch_tree = build_fetch_tree(chat_id, set_chat_meta, set_tree);
     
     Effect::new({
         let fetch = fetch_tree.clone();
@@ -325,512 +244,44 @@ pub fn ChatPage() -> impl IntoView {
         });
     });
 
-    let send = {
-        move |ev: leptos::ev::SubmitEvent| {
-            ev.prevent_default();
-            let content = draft.get_untracked();
-            if content.is_empty() || is_generating.get_untracked() {
-                return;
-            }
-            set_draft.set(String::new());
-            set_error.set(None);
-            set_stream_error.set(false);
-            set_is_generating.set(true);
-            set_is_self_reply.set(false);
-            set_streaming_reply.set(String::new());
-            set_current_member.set(None);
-            set_group_reply_log.set(Vec::new());
-            set_pending_user_text.set(Some(content.clone()));
-            
-            leptos::task::spawn_local(async move {
-                gloo_timers::future::TimeoutFuture::new(50).await;
-                if let Some(window) = web_sys::window() {
-                    if let Some(doc) = window.document() {
-                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                            el.set_scroll_top(el.scroll_height());
-                        }
-                    }
-                }
-            });
-
-            let id = chat_id.get_untracked();
-            // branch point was picked, otherwise every send with no parent
-            // starts a brand new root and orphans everything before it.
-            let parent = send_parent_id
-                .get_untracked()
-                .or_else(|| active_branch.get_untracked().last().map(|m| m.id.clone()));
-            let body = serde_json::json!({ "content": content, "parent_id": parent }).to_string();
-            let navigate = navigate_send.clone();
-            spawn_local(async move {
-                let url = format!("/api/chats/{id}/generate");
-                let result = crate::api::stream_post(
-                    &url,
-                    Some(body),
-                    move |delta| {
-                        let mut should_scroll = false;
-                        if let Some(window) = web_sys::window() {
-                            if let Some(doc) = window.document() {
-                                if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                    let scroll_top = el.scroll_top();
-                                    let client_height = el.client_height();
-                                    let scroll_height = el.scroll_height();
-                                    let threshold = scroll_height - (scroll_top + client_height);
-                                    if threshold < 150 || scroll_top < 1 {
-                                        should_scroll = true;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        set_streaming_reply.update(|current| current.push_str(&delta));
-
-                        if should_scroll {
-                            leptos::task::spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(50).await;
-                                if let Some(window) = web_sys::window() {
-                                    if let Some(doc) = window.document() {
-                                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                            el.set_scroll_top(el.scroll_height());
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    },
-                    move |character_id: String, name: String| {
-                        let previous = current_member.get_untracked();
-                        if let Some((prev_id, prev_name)) = previous {
-                            let content = streaming_reply.get_untracked();
-                            if !content.is_empty() {
-                                set_group_reply_log.update(|log| log.push((prev_id, prev_name, content)));
-                            }
-                        }
-                        set_streaming_reply.set(String::new());
-                        set_current_member.set(Some((character_id, name)));
-                    },
-                    move |err| {
-                        if err == crate::api::SESSION_EXPIRED_ERROR {
-                            navigate("/login", NavigateOptions::default());
-                        } else {
-                            set_stream_error.set(true);
-                            set_error.set(Some(err));
-                        }
-                    },
-                )
-                .await;
-                if let Err(e) = result {
-                    set_stream_error.set(true);
-                    set_error.set(Some(e));
-                }
-                set_is_generating.set(false);
-                set_streaming_reply.set(String::new());
-                set_current_member.set(None);
-                set_group_reply_log.set(Vec::new());
-                set_pending_user_text.set(None);
-                set_send_parent_id.set(None);
-                set_regenerating_msg_id.set(None);
-                // the new message is the sole child of whatever branch was
-                // active, so it's already what walk_active_branch defaults to
-                // there - clearing the whole map used to also wipe every
-                // earlier fork's selection (e.g. original vs. regenerated),
-                // silently rerouting the view through the newest sibling at
-                // each one instead of the branch actually being replied to
-                fetch_tree();
-            });
-        }
+    let signals = ChatSignals {
+        chat_id,
+        tree,
+        set_tree,
+        active_branch,
+        draft,
+        set_draft,
+        set_pending_user_text,
+        streaming_reply,
+        set_streaming_reply,
+        current_member,
+        set_current_member,
+        set_group_reply_log,
+        is_generating,
+        set_is_generating,
+        set_stream_error,
+        set_is_self_reply,
+        set_more_menu_open,
+        set_error,
+        send_parent_id,
+        set_send_parent_id,
+        set_regenerating_msg_id,
+        edit_text,
+        set_editing_id,
+        set_selected_children,
     };
 
-    let regenerate = std::sync::Arc::new({
-        let navigate_regen = navigate.clone();
-        move || {
-            if is_generating.get_untracked() {
-                return;
-            }
-            set_error.set(None);
-            set_stream_error.set(false);
-            set_is_generating.set(true);
-            set_is_self_reply.set(false);
-            set_streaming_reply.set(String::new());
-            set_current_member.set(None);
-            set_group_reply_log.set(Vec::new());
+    let send = build_send(signals, fetch_tree, navigate.clone());
+    let regenerate = build_regenerate(signals, fetch_tree, navigate.clone());
+    let continue_gen = build_continue_gen(signals, fetch_tree, navigate.clone());
+    let respond_as_me = build_respond_as_me(signals, fetch_tree, navigate.clone());
 
-            let id = chat_id.get_untracked();
-            let branch = active_branch.get_untracked();
-            let mut regen_character_id = None;
-            if let Some(last) = branch.last() {
-                if last.role == "assistant" {
-                    set_regenerating_msg_id.set(Some(last.id.clone()));
-                    regen_character_id = last.character_id.clone();
-                }
-            }
-            // a group reroll targets one named member (the one whose turn
-            // is being redone), so the backend needs character_id on top of
-            // the usual parent_id branch point. without it a group chat's
-            // regenerate call just 400s. messages written before run_group_generation
-            // ever touched them (greetings, or replies from back when the chat
-            // was still 1:1) have no character_id of their own, so fall back to
-            // the group's first enabled member rather than silently dropping the param
-            let group = tree.get_untracked().group;
-            let is_group_chat = group.is_some();
-            if regen_character_id.is_none() {
-                regen_character_id = group.as_ref().and_then(|g| {
-                    g.members.iter().find(|m| !m.disabled).map(|m| m.character_id.clone())
-                });
-            }
-            let mut query_parts = Vec::new();
-            if let Some(pid) = regeneration_parent_id(&branch) {
-                query_parts.push(format!("parent_id={pid}"));
-            }
-            if is_group_chat {
-                if let Some(cid) = regen_character_id {
-                    query_parts.push(format!("character_id={cid}"));
-                }
-            }
-            let parent_param = if query_parts.is_empty() {
-                String::new()
-            } else {
-                format!("?{}", query_parts.join("&"))
-            };
-            let navigate = navigate_regen.clone();
-            spawn_local(async move {
-                let url = format!("/api/chats/{id}/regenerate{parent_param}");
-                let result = crate::api::stream_post(
-                    &url,
-                    None,
-                    move |delta| {
-                        let mut should_scroll = false;
-                        if let Some(window) = web_sys::window() {
-                            if let Some(doc) = window.document() {
-                                if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                    let scroll_top = el.scroll_top();
-                                    let client_height = el.client_height();
-                                    let scroll_height = el.scroll_height();
-                                    let threshold = scroll_height - (scroll_top + client_height);
-                                    if threshold < 150 || scroll_top < 1 {
-                                        should_scroll = true;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        set_streaming_reply.update(|current| current.push_str(&delta));
-
-                        if should_scroll {
-                            leptos::task::spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(50).await;
-                                if let Some(window) = web_sys::window() {
-                                    if let Some(doc) = window.document() {
-                                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                            el.set_scroll_top(el.scroll_height());
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    },
-                    move |character_id: String, name: String| {
-                        let previous = current_member.get_untracked();
-                        if let Some((prev_id, prev_name)) = previous {
-                            let content = streaming_reply.get_untracked();
-                            if !content.is_empty() {
-                                set_group_reply_log.update(|log| log.push((prev_id, prev_name, content)));
-                            }
-                        }
-                        set_streaming_reply.set(String::new());
-                        set_current_member.set(Some((character_id, name)));
-                    },
-                    move |err| {
-                        if err == crate::api::SESSION_EXPIRED_ERROR {
-                            navigate("/login", NavigateOptions::default());
-                        } else {
-                            set_stream_error.set(true);
-                            set_error.set(Some(err));
-                        }
-                    },
-                )
-                .await;
-                if let Err(e) = result {
-                    set_stream_error.set(true);
-                    set_error.set(Some(e));
-                }
-                set_is_generating.set(false);
-                set_streaming_reply.set(String::new());
-                set_current_member.set(None);
-                set_group_reply_log.set(Vec::new());
-                set_regenerating_msg_id.set(None);
-                fetch_tree();
-            });
-        }
-    });
-
-    let continue_gen = {
-        move |_| {
-            if is_generating.get_untracked() {
-                return;
-            }
-            set_error.set(None);
-            set_stream_error.set(false);
-            set_is_generating.set(true);
-            set_is_self_reply.set(false);
-            set_more_menu_open.set(false);
-            set_streaming_reply.set(String::new());
-            set_current_member.set(None);
-            set_group_reply_log.set(Vec::new());
-
-            let id = chat_id.get_untracked();
-            let navigate = navigate_continue.clone();
-            spawn_local(async move {
-                let url = format!("/api/chats/{id}/continue");
-                let result = crate::api::stream_post(
-                    &url,
-                    None,
-                    move |delta| {
-                        let mut should_scroll = false;
-                        if let Some(window) = web_sys::window() {
-                            if let Some(doc) = window.document() {
-                                if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                    let scroll_top = el.scroll_top();
-                                    let client_height = el.client_height();
-                                    let scroll_height = el.scroll_height();
-                                    let threshold = scroll_height - (scroll_top + client_height);
-                                    if threshold < 150 || scroll_top < 1 {
-                                        should_scroll = true;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        set_streaming_reply.update(|current| current.push_str(&delta));
-
-                        if should_scroll {
-                            leptos::task::spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(50).await;
-                                if let Some(window) = web_sys::window() {
-                                    if let Some(doc) = window.document() {
-                                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                            el.set_scroll_top(el.scroll_height());
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    },
-                    move |_character_id: String, _name: String| {},
-                    move |err| {
-                        if err == crate::api::SESSION_EXPIRED_ERROR {
-                            navigate("/login", NavigateOptions::default());
-                        } else {
-                            set_stream_error.set(true);
-                            set_error.set(Some(err));
-                        }
-                    },
-                )
-                .await;
-                if let Err(e) = result {
-                    set_stream_error.set(true);
-                    set_error.set(Some(e));
-                }
-                set_is_generating.set(false);
-                set_streaming_reply.set(String::new());
-                set_current_member.set(None);
-                set_group_reply_log.set(Vec::new());
-                fetch_tree();
-            });
-        }
-    };
-
-    let respond_as_me = {
-        move |_| {
-            if is_generating.get_untracked() {
-                return;
-            }
-            set_error.set(None);
-            set_stream_error.set(false);
-            set_is_generating.set(true);
-            set_is_self_reply.set(true);
-            set_more_menu_open.set(false);
-            set_streaming_reply.set(String::new());
-            set_current_member.set(None);
-            set_group_reply_log.set(Vec::new());
-
-            let id = chat_id.get_untracked();
-            let navigate = navigate_self.clone();
-            spawn_local(async move {
-                let url = format!("/api/chats/{id}/respond-as-user");
-                let result = crate::api::stream_post(
-                    &url,
-                    None,
-                    move |delta| {
-                        let mut should_scroll = false;
-                        if let Some(window) = web_sys::window() {
-                            if let Some(doc) = window.document() {
-                                if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                    let scroll_top = el.scroll_top();
-                                    let client_height = el.client_height();
-                                    let scroll_height = el.scroll_height();
-                                    let threshold = scroll_height - (scroll_top + client_height);
-                                    if threshold < 150 || scroll_top < 1 {
-                                        should_scroll = true;
-                                    }
-                                }
-                            }
-                        }
-
-                        set_streaming_reply.update(|current| current.push_str(&delta));
-
-                        if should_scroll {
-                            leptos::task::spawn_local(async move {
-                                gloo_timers::future::TimeoutFuture::new(50).await;
-                                if let Some(window) = web_sys::window() {
-                                    if let Some(doc) = window.document() {
-                                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                                            el.set_scroll_top(el.scroll_height());
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    },
-                    move |_character_id: String, _name: String| {},
-                    move |err| {
-                        if err == crate::api::SESSION_EXPIRED_ERROR {
-                            navigate("/login", NavigateOptions::default());
-                        } else {
-                            set_stream_error.set(true);
-                            set_error.set(Some(err));
-                        }
-                    },
-                )
-                .await;
-                if let Err(e) = result {
-                    set_stream_error.set(true);
-                    set_error.set(Some(e));
-                }
-                set_is_generating.set(false);
-                set_is_self_reply.set(false);
-                set_streaming_reply.set(String::new());
-                set_current_member.set(None);
-                set_group_reply_log.set(Vec::new());
-                fetch_tree();
-            });
-        }
-    };
-
-    let delete = move |message_id: String| {
-        spawn_local(async move {
-            match crate::api::delete_message(&message_id).await {
-                Ok(()) => {
-                    set_error.set(None);
-                    fetch_tree();
-                }
-                Err(e) => set_error.set(Some(e)),
-            }
-        });
-    };
-
-    let delete_all_below = move |message_id: String| {
-        let branch = active_branch.get_untracked();
-        if let Some(idx) = branch.iter().position(|m| m.id == message_id) {
-            let to_delete: Vec<String> = branch[idx..].iter().map(|m| m.id.clone()).collect();
-            spawn_local(async move {
-                for id in to_delete.into_iter().rev() {
-                    let _ = crate::api::delete_message(&id).await;
-                }
-                set_error.set(None);
-                fetch_tree();
-            });
-        }
-    };
-
-    let toggle_visibility = move |message_id: String, visible: bool| {
-        spawn_local(async move {
-            if let Err(e) = crate::api::set_message_visibility(&message_id, !visible).await {
-                set_error.set(Some(e));
-            } else {
-                fetch_tree();
-            }
-        });
-    };
-
-    let save_edit = move |message_id: String| {
-        let content = edit_text.get_untracked();
-        spawn_local(async move {
-            if let Err(e) = crate::api::edit_message(&message_id, &content).await {
-                set_error.set(Some(e));
-            } else {
-                set_editing_id.set(None);
-                fetch_tree();
-            }
-        });
-    };
-
-    let select_sibling = move |parent_id: String, child_id: String| {
-        let cid = chat_id.get_untracked();
-
-        let mut was_at_bottom = false;
-        if let Some(window) = web_sys::window() {
-            if let Some(doc) = window.document() {
-                if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                    let scroll_top = el.scroll_top();
-                    let client_height = el.client_height();
-                    let scroll_height = el.scroll_height();
-                    if scroll_height - (scroll_top + client_height) < 150 {
-                        was_at_bottom = true;
-                    }
-                }
-            }
-        }
-
-        set_selected_children.update(|map| {
-            map.insert(parent_id.clone(), child_id.clone());
-        });
-
-        // a sibling can be a different length than the one it replaced;
-        // if the view was pinned to the bottom before switching, keep it
-        // pinned instead of leaving the scroll position stuck wherever it
-        // happened to land relative to the top of the new content
-        if was_at_bottom {
-            leptos::task::spawn_local(async move {
-                gloo_timers::future::TimeoutFuture::new(50).await;
-                if let Some(window) = web_sys::window() {
-                    if let Some(doc) = window.document() {
-                        if let Ok(Some(el)) = doc.query_selector(".main-content") {
-                            el.set_scroll_top(el.scroll_height());
-                        }
-                    }
-                }
-            });
-        }
-
-        spawn_local(async move {
-            if let Ok(extra) = crate::api::subtree(&cid, &child_id, 50).await {
-                set_tree.update(|t| {
-                    for (id, node) in extra {
-                        if !t.messages.contains_key(&id) {
-                            if let Some(pid) = &node.parent_id {
-                                if let Some(parent) = t.messages.get_mut(pid) {
-                                    if !parent.children.contains(&id) {
-                                        parent.children.push(id.clone());
-                                    }
-                                }
-                            }
-                            t.messages.insert(id, node);
-                        }
-                    }
-                });
-            }
-        });
-    };
-
-    let select_branch_point = move |message_id: String| {
-        let current = send_parent_id.get();
-        let new_val = if current.as_ref() == Some(&message_id) {
-            None
-        } else {
-            Some(message_id)
-        };
-        set_send_parent_id.set(new_val);
-    };
+    let delete = build_delete(signals, fetch_tree);
+    let delete_all_below = build_delete_all_below(signals, fetch_tree);
+    let toggle_visibility = build_toggle_visibility(signals, fetch_tree);
+    let save_edit = build_save_edit(signals, fetch_tree);
+    let select_sibling = build_select_sibling(signals);
+    let select_branch_point = build_select_branch_point(signals);
 
     let leaf_is_assistant = Memo::new(move |_| {
         active_branch
