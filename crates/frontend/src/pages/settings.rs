@@ -45,9 +45,16 @@ pub fn SettingsPage() -> impl IntoView {
     let (subscription_only, set_subscription_only) = signal(crate::api::get_subscription_only_models());
     let (export_import_error, set_export_import_error) = signal(Option::<String>::None);
     let (import_done, set_import_done) = signal(false);
+    let (account_export_import_error, set_account_export_import_error) = signal(Option::<String>::None);
+    let (account_import_done, set_account_import_done) = signal(false);
+    let (delete_confirm_open, set_delete_confirm_open) = signal(false);
+    let (delete_confirm_text, set_delete_confirm_text) = signal(String::new());
+    let (delete_in_progress, set_delete_in_progress) = signal(false);
+    let (delete_error, set_delete_error) = signal(Option::<String>::None);
 
     let me_resource = LocalResource::new(|| async move { crate::api::fetch_me().await });
 
+    let (username, set_username) = signal(String::new());
     let (display_name, set_display_name) = signal(String::new());
     let (persona, set_persona) = signal(String::new());
     let (use_persona, set_use_persona) = signal(false);
@@ -88,6 +95,7 @@ pub fn SettingsPage() -> impl IntoView {
 
     Effect::new(move |_| {
         if let Some(Ok(me)) = me_resource.get() {
+            set_username.set(me.username);
             set_display_name.set(me.display_name.unwrap_or_default());
             set_persona.set(me.persona.unwrap_or_default());
             set_use_persona.set(me.use_persona);
@@ -206,6 +214,67 @@ pub fn SettingsPage() -> impl IntoView {
         });
     };
 
+    let on_export_account = move |_: leptos::ev::MouseEvent| {
+        set_account_export_import_error.set(None);
+        spawn_local(async move {
+            match crate::api::export_account().await {
+                Ok(json) => {
+                    if let Err(e) = crate::api::download_text_file("aetheria-account-export.json", "application/json", &json) {
+                        set_account_export_import_error.set(Some(e));
+                    }
+                }
+                Err(e) => set_account_export_import_error.set(Some(e)),
+            }
+        });
+    };
+
+    let on_import_account_file_selected = move |ev: leptos::ev::Event| {
+        set_account_export_import_error.set(None);
+        set_account_import_done.set(false);
+        let target = event_target::<web_sys::HtmlInputElement>(&ev);
+        let Some(files) = target.files() else { return };
+        let Some(file) = files.get(0) else { return };
+        spawn_local(async move {
+            let text = match wasm_bindgen_futures::JsFuture::from(file.text()).await {
+                Ok(v) => v.as_string().unwrap_or_default(),
+                Err(_) => {
+                    set_account_export_import_error.set(Some("Could not read the selected file".to_string()));
+                    return;
+                }
+            };
+            match crate::api::import_account(&text).await {
+                Ok(()) => {
+                    set_account_import_done.set(true);
+                    // a full reload is the simplest way to get every imported
+                    // character/chat/lorebook/etc. showing up everywhere.
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.location().reload();
+                    }
+                }
+                Err(e) => set_account_export_import_error.set(Some(e)),
+            }
+        });
+    };
+
+    let on_confirm_delete = move |_: leptos::ev::MouseEvent| {
+        set_delete_error.set(None);
+        set_delete_in_progress.set(true);
+        let typed = delete_confirm_text.get_untracked();
+        spawn_local(async move {
+            match crate::api::delete_account_data(&typed).await {
+                Ok(()) => {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.location().set_href("/");
+                    }
+                }
+                Err(e) => {
+                    set_delete_error.set(Some(e));
+                    set_delete_in_progress.set(false);
+                }
+            }
+        });
+    };
+
     let load_models = move |_| {
         set_error.set(None);
         set_loading_models.set(true);
@@ -304,6 +373,70 @@ pub fn SettingsPage() -> impl IntoView {
                 {move || import_done.get().then(|| view! { <span style="color: #4CAF50; font-family: monospace; font-size: 0.85rem;">"✓ IMPORTED"</span> })}
                 {move || export_import_error.get().map(|e| view! { <span style="color: #ff4444; font-family: monospace; font-size: 0.85rem;">{e}</span> })}
             </div>
+
+            <div style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--color-error);">
+                <h3 style="color: var(--color-error); font-family: monospace; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 1rem;">"Danger Zone"</h3>
+                <div style="display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <button type="button" on:click=on_export_account style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
+                        "Export My Data"
+                    </button>
+                    <label style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
+                        "Import Data"
+                        <input type="file" accept="application/json" style="display: none;" on:change=on_import_account_file_selected />
+                    </label>
+                    {move || account_import_done.get().then(|| view! { <span style="color: #4CAF50; font-family: monospace; font-size: 0.8rem;">"✓ IMPORTED"</span> })}
+                    {move || account_export_import_error.get().map(|e| view! { <span style="color: #ff4444; font-family: monospace; font-size: 0.8rem;">{e}</span> })}
+                </div>
+                <span style="color: var(--color-text-muted); font-family: monospace; font-size: 0.75rem; opacity: 0.7; display: block; margin-bottom: 1.5rem;">
+                    "Exports characters, chats, groups, lorebooks, presets, regex scripts, and themes. Doesn't include your API keys or account settings. Import always adds new content, never overwrites."
+                </span>
+                <button
+                    type="button"
+                    on:click=move |_| set_delete_confirm_open.set(true)
+                    style="background: transparent; border: 1px solid var(--color-error); color: var(--color-error); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;"
+                >
+                    "Delete Everything"
+                </button>
+            </div>
+
+            {move || delete_confirm_open.get().then(|| view! {
+                <div class="modal-backdrop" on:click=move |_| set_delete_confirm_open.set(false)>
+                    <div class="modal-box" style="max-width: 480px;" on:click=|ev| ev.stop_propagation()>
+                        <div class="modal-header">
+                            <h2>"Delete Everything"</h2>
+                            <button class="icon-btn" on:click=move |_| set_delete_confirm_open.set(false)>
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="modal-body" style="padding: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+                            <p>"This permanently deletes every character, chat, group chat, lorebook, preset, regex script, and theme on your account. It does NOT touch your account itself, your login, or your API keys/settings."</p>
+                            <p style="font-weight: bold;">"This can't be undone. Export your data first if you want a backup."</p>
+                            <p>"Type your username (" {move || username.get()} ") to confirm:"</p>
+                            <input
+                                type="text"
+                                prop:value=delete_confirm_text
+                                on:input=move |ev| set_delete_confirm_text.set(event_target_value(&ev))
+                                style="padding: 0.5rem; font-family: monospace;"
+                            />
+                            {move || delete_error.get().map(|e| view! { <span style="color: #ff4444;">{e}</span> })}
+                            <button
+                                class="btn danger"
+                                style="background: var(--color-error); color: white;"
+                                disabled=move || {
+                                    let expected = username.get();
+                                    expected.is_empty() || delete_confirm_text.get() != expected || delete_in_progress.get()
+                                }
+                                on:click=on_confirm_delete
+                            >
+                                {move || if delete_in_progress.get() { "Deleting..." } else { "Permanently Delete Everything" }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            })}
 
             <form class="settings-form" on:submit=on_submit style="display: flex; flex-direction: column; gap: 2.5rem;">
                 
