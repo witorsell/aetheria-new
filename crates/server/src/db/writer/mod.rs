@@ -61,6 +61,7 @@ impl Writer {
     }
 }
 
+mod account;
 mod characters;
 mod chats;
 mod groups;

@@ -21,6 +21,7 @@ fn get_max_upload_bytes() -> usize {
         .unwrap_or(25 * 1024 * 1024)
 }
 
+pub mod account;
 pub mod chats;
 pub mod characters;
 pub mod generate;
@@ -111,6 +112,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/settings/export", get(settings::export))
         .route("/api/settings/import", post(settings::import))
         .route("/api/settings/models", get(settings::list_models))
+        .route("/api/account/export-all", get(account::export_all))
+        .route("/api/account/data", delete(account::delete_all))
         .route("/api/proxy", get(proxy::proxy_image))
         .route("/api/logout", post(crate::auth::logout))
         .route("/api/me", get(crate::auth::me).put(crate::auth::update_me))

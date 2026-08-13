@@ -63,3 +63,64 @@ async fn export_all_includes_seeded_content_and_resolves_cross_references() {
     assert_eq!(export.chats[0].messages[0].content, "hello");
     assert_eq!(export.chats[0].messages[0].parent_id, None);
 }
+
+#[tokio::test]
+async fn nuclear_delete_wipes_content_for_that_user_only() {
+    let (app, cookie_a, cookie_b) = common::authed_app_with_second_user().await;
+
+    let char_a = app.clone().oneshot(
+        Request::builder().method("POST").uri("/api/characters")
+            .header(header::COOKIE, cookie_a.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"A's Character"}"#)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(char_a.status(), StatusCode::OK);
+
+    let char_b = app.clone().oneshot(
+        Request::builder().method("POST").uri("/api/characters")
+            .header(header::COOKIE, cookie_b.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"B's Character"}"#)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(char_b.status(), StatusCode::OK);
+
+    let delete_response = app.clone().oneshot(
+        Request::builder().method("DELETE").uri("/api/account/data")
+            .header(header::COOKIE, cookie_a.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"username":"testuser"}"#)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(delete_response.status(), StatusCode::OK);
+
+    let a_export = app.clone().oneshot(
+        Request::builder().method("GET").uri("/api/account/export-all")
+            .header(header::COOKIE, cookie_a.clone())
+            .body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    let a_bytes = axum::body::to_bytes(a_export.into_body(), usize::MAX).await.unwrap();
+    let a: server::models::account::AccountExport = serde_json::from_slice(&a_bytes).unwrap();
+    assert_eq!(a.characters.len(), 0);
+
+    let b_export = app.clone().oneshot(
+        Request::builder().method("GET").uri("/api/account/export-all")
+            .header(header::COOKIE, cookie_b.clone())
+            .body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    let b_bytes = axum::body::to_bytes(b_export.into_body(), usize::MAX).await.unwrap();
+    let b: server::models::account::AccountExport = serde_json::from_slice(&b_bytes).unwrap();
+    assert_eq!(b.characters.len(), 1);
+    assert_eq!(b.characters[0].name, "B's Character");
+}
+
+#[tokio::test]
+async fn nuclear_delete_requires_correct_username() {
+    let (app, cookie) = common::authed_app().await;
+
+    let response = app.clone().oneshot(
+        Request::builder().method("DELETE").uri("/api/account/data")
+            .header(header::COOKIE, cookie.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"username":"wrong-name"}"#)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
