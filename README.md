@@ -177,8 +177,14 @@ Optional (on a fresh install, at least one onboarding method is needed, either b
 
 ### Build
 
+The server and frontend use different release profiles - opt-level=3 for
+the server binary (it's a latency-sensitive SSE streaming process, so
+runtime speed matters more than disk size), opt-level="z" for the
+frontend wasm bundle (size matters more there, since it's what a browser
+downloads on every page load).
+
 ```bash
-cd crates/frontend && trunk build --release && cd ../..
+cd crates/frontend && trunk build --release --cargo-profile wasm-release && cd ../..
 cargo build --release -p server
 ```
 
