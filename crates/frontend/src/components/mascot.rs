@@ -64,7 +64,7 @@ pub fn MascotPeekCorner() -> impl IntoView {
                     set_pose_clicked.set(false);
                 }
             },
-            std::time::Duration::from_millis(400),
+            std::time::Duration::from_millis(220),
         );
     };
 
