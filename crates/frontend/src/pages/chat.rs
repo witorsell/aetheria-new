@@ -573,6 +573,9 @@ pub fn ChatPage() -> impl IntoView {
             set_is_generating.set(true);
             set_is_self_reply.set(false);
             set_more_menu_open.set(false);
+            set_streaming_reply.set(String::new());
+            set_current_member.set(None);
+            set_group_reply_log.set(Vec::new());
 
             let id = chat_id.get_untracked();
             let navigate = navigate_continue.clone();
