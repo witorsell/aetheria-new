@@ -61,7 +61,12 @@ async fn main() {
         }
     };
     tracing::info!("listening on {}", listener.local_addr().map(|a| a.to_string()).unwrap_or(bind_addr));
-    if let Err(e) = axum::serve(listener, app).await {
+    // exposes ConnectInfo<SocketAddr> as a fallback client-IP source for
+    // per-IP login rate limiting, for a direct connection with no reverse
+    // proxy in front (the normal deployment sits behind nginx, which sets
+    // X-Real-IP and is preferred - see auth::client_ip)
+    let make_service = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+    if let Err(e) = axum::serve(listener, make_service).await {
         tracing::error!("server error: {e}");
         std::process::exit(1);
     }

@@ -1,5 +1,17 @@
 use tower::ServiceExt;
 
+/// login's handler requires ConnectInfo<SocketAddr> for per-IP rate
+/// limiting, which normally only gets populated by
+/// into_make_service_with_connect_info() at the real hyper connection level -
+/// a bare Router::oneshot() call never provides it. layering a fixed
+/// Extension(ConnectInfo(..)) onto the test router satisfies the extractor
+/// the same way a real connection would, without every test needing to know
+/// or care about it.
+pub fn with_fake_connect_info(app: axum::Router) -> axum::Router {
+    let fake_addr: std::net::SocketAddr = ([127, 0, 0, 1], 0).into();
+    app.layer(axum::extract::Extension(axum::extract::ConnectInfo(fake_addr)))
+}
+
 /// logs into `app` as `username`/`password` and returns the session cookie
 /// from the response. shared by `authed_app` and `authed_app_with_second_user`
 /// so both log in the same way.
@@ -40,7 +52,7 @@ pub async fn authed_app() -> (axum::Router, String) {
         .execute(&db.read_pool)
         .await
         .ok();
-    let app = server::routes::build_router(server::state::AppState::new(db, true));
+    let app = with_fake_connect_info(server::routes::build_router(server::state::AppState::new(db, true)));
 
     let cookie = login(&app, "testuser", "test-pass-1234").await;
 
@@ -75,7 +87,7 @@ pub async fn authed_app_with_second_user() -> (axum::Router, String, String) {
         .await
         .expect("inserting the second user should not fail");
 
-    let app = server::routes::build_router(server::state::AppState::new(db, true));
+    let app = with_fake_connect_info(server::routes::build_router(server::state::AppState::new(db, true)));
 
     let first_cookie = login(&app, "testuser", "test-pass-1234").await;
     let second_cookie = login(&app, "dana", "also-test-pass-1234").await;

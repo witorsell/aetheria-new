@@ -74,6 +74,14 @@ pub struct AppState {
     /// brute-force stays locked as long as attempts keep coming in, and
     /// clears itself 15 minutes after they stop.
     pub login_attempts: Cache<String, u32>,
+    /// failed login attempts per client IP, same TTL/window semantics as
+    /// login_attempts above. the per-username lockout alone doesn't stop an
+    /// attacker spraying many different usernames from one IP - each one
+    /// individually stays under that username's own threshold forever.
+    /// same 15-minute self-clearing window, but a much higher threshold:
+    /// this exists to catch spraying, not to duplicate the per-account
+    /// lockout, and a shared/NAT'd IP can represent several real users.
+    pub login_attempts_by_ip: Cache<String, u32>,
     /// rate limiter token buckets for text generation endpoints per user
     pub generation_rate_limiter: Cache<i64, std::sync::Arc<tokio::sync::Mutex<TokenBucket>>>,
     /// serializes maybe_update_chat_summary passes per chat_id. it's spawned
@@ -133,6 +141,10 @@ impl AppState {
                 .build(),
             http_client,
             login_attempts: Cache::builder()
+                .max_capacity(10_000)
+                .time_to_live(Duration::from_secs(15 * 60))
+                .build(),
+            login_attempts_by_ip: Cache::builder()
                 .max_capacity(10_000)
                 .time_to_live(Duration::from_secs(15 * 60))
                 .build(),

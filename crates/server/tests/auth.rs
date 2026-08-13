@@ -1,3 +1,5 @@
+mod common;
+
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use tower::ServiceExt;
@@ -11,7 +13,7 @@ async fn test_app() -> axum::Router {
 
     let db = server::db::connect(":memory:").await;
     server::bootstrap_user(&db, "testuser", "test-pass-1234").await;
-    server::routes::build_router(server::state::AppState::new(db, true))
+    common::with_fake_connect_info(server::routes::build_router(server::state::AppState::new(db, true)))
 }
 
 #[tokio::test]
@@ -84,6 +86,52 @@ async fn repeated_wrong_passwords_lock_the_account_out() {
         .await
         .unwrap();
     assert_eq!(still_locked.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn spraying_different_usernames_from_one_ip_eventually_locks_out_that_ip() {
+    let app = test_app().await;
+
+    // 25 failed attempts against 25 different (nonexistent) usernames from
+    // the same IP - each username individually stays at exactly 1 failed
+    // attempt, nowhere near its own 5-attempt lockout, but the shared IP
+    // behind all of them should still trip its own higher, spray-detecting
+    // threshold
+    for i in 0..25 {
+        let body = serde_json::json!({"username": format!("nonexistent{i}"), "password": "wrong"}).to_string();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/login")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "attempt {i} against a fresh username should just be a normal auth failure, not already locked out");
+    }
+
+    // a 26th attempt, against yet another brand new username never tried
+    // before, must still be blocked - proving the lockout tracks the
+    // source IP, not any individual account (which is exactly the gap a
+    // per-username-only lockout leaves: spraying many usernames from one
+    // address, each staying under its own threshold forever)
+    let body = serde_json::json!({"username": "yet-another-new-username", "password": "wrong"}).to_string();
+    let locked_out = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(locked_out.status(), StatusCode::TOO_MANY_REQUESTS, "spraying enough distinct usernames from one IP must eventually lock out that IP");
 }
 
 #[tokio::test]

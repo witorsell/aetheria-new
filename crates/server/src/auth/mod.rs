@@ -1,12 +1,13 @@
-use axum::extract::Extension;
+use axum::extract::{ConnectInfo, Extension};
 use crate::state::AppState;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use axum::extract::{Multipart, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use axum_extra::extract::cookie::{Cookie, PrivateCookieJar};
 use serde::Deserialize;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -20,16 +21,44 @@ pub struct LoginRequest {
 }
 
 const MAX_LOGIN_ATTEMPTS: u32 = 5;
+// deliberately much higher than the per-username threshold: this exists to
+// catch one IP spraying many different usernames (each individually staying
+// under its own lockout forever), not to duplicate the per-account limit -
+// and a shared/NAT'd IP can legitimately represent several real users.
+const MAX_LOGIN_ATTEMPTS_PER_IP: u32 = 25;
+
+/// the real client address for login rate limiting. the normal deployment
+/// sits behind nginx (see deploy/nginx-aetheria.conf), which unconditionally
+/// overwrites X-Real-IP with $remote_addr regardless of what a client sends -
+/// unlike X-Forwarded-For, which nginx only appends to, so a client-supplied
+/// value ahead of the real one would survive. falls back to the direct TCP
+/// peer address for a bare deployment with no reverse proxy in front.
+fn client_ip(headers: &HeaderMap, connect_info: SocketAddr) -> String {
+    headers
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| connect_info.ip().to_string())
+}
 
 pub async fn login(
     State(state): State<AppState>,
+    ConnectInfo(connect_info): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     jar: PrivateCookieJar,
     Json(req): Json<LoginRequest>,
 ) -> Result<(PrivateCookieJar, StatusCode), StatusCode> {
     tracing::info!("Login attempt for username: {}", req.username);
     let attempt_key = req.username.to_lowercase();
+    let ip_key = client_ip(&headers, connect_info);
+
     if state.login_attempts.get(&attempt_key).await.unwrap_or(0) >= MAX_LOGIN_ATTEMPTS {
         tracing::warn!("Login locked out for username: {}", req.username);
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    if state.login_attempts_by_ip.get(&ip_key).await.unwrap_or(0) >= MAX_LOGIN_ATTEMPTS_PER_IP {
+        tracing::warn!(ip = %ip_key, "Login locked out for IP");
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
@@ -37,8 +66,16 @@ pub async fn login(
     if result.is_err() {
         let next_count = state.login_attempts.get(&attempt_key).await.unwrap_or(0) + 1;
         state.login_attempts.insert(attempt_key.clone(), next_count).await;
+        let next_ip_count = state.login_attempts_by_ip.get(&ip_key).await.unwrap_or(0) + 1;
+        state.login_attempts_by_ip.insert(ip_key.clone(), next_ip_count).await;
     } else {
         state.login_attempts.invalidate(&attempt_key).await;
+        // the IP counter deliberately does NOT reset here: it's tracking
+        // "how many failures has this address produced," not tied to any
+        // one account, and resetting it on any success would let an
+        // attacker who holds even one valid credential periodically log
+        // into it to refresh their spray budget. it only decays via its
+        // own TTL.
     }
     let user = result?;
 
