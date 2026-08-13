@@ -227,3 +227,84 @@ async fn import_is_additive_not_destructive() {
     assert!(names.contains(&"Imported Copy"));
     assert_eq!(final_state.characters.len(), 2);
 }
+
+#[tokio::test]
+async fn import_survives_a_tag_name_that_already_exists_on_another_account() {
+    // tags.name carries a bare, instance-wide UNIQUE constraint (not scoped
+    // by user_id - see migrations/0001_init.sql). account A creates a tag
+    // named "Fantasy" and exports a character carrying it; account B, which
+    // has never touched tags itself, then imports that export. the "Fantasy"
+    // row already exists in the table (owned by A) by the time B's import
+    // runs, so a plain INSERT would hit the UNIQUE constraint and roll back
+    // the whole transaction - character, chat, everything - even though B's
+    // own account had nothing conflicting. the fix must let this succeed.
+    //
+    // (note: the reused tag ends up "owned" by whichever account originally
+    // created that name - here, A - since the schema has no per-user
+    // scoping to fall back to. that's a pre-existing consequence of the
+    // bare UNIQUE constraint, not something in scope to fix here, so this
+    // test doesn't assert anything about tag visibility from B's own
+    // perspective - only that the import itself is no longer all-or-nothing
+    // on a tag-name collision.)
+    let (app, cookie_a, cookie_b) = common::authed_app_with_second_user().await;
+
+    let tag = app.clone().oneshot(
+        Request::builder().method("POST").uri("/api/tags")
+            .header(header::COOKIE, cookie_a.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"Fantasy"}"#)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(tag.status(), StatusCode::OK);
+    let tag_json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(tag.into_body(), usize::MAX).await.unwrap()
+    ).unwrap();
+    let tag_id = tag_json["id"].as_str().unwrap().to_string();
+
+    let character = app.clone().oneshot(
+        Request::builder().method("POST").uri("/api/characters")
+            .header(header::COOKIE, cookie_a.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"name":"Aeth"}"#)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(character.status(), StatusCode::OK);
+    let character_json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(character.into_body(), usize::MAX).await.unwrap()
+    ).unwrap();
+    let character_id = character_json["id"].as_str().unwrap().to_string();
+
+    let set_tags = app.clone().oneshot(
+        Request::builder().method("PUT").uri(format!("/api/characters/{character_id}/tags"))
+            .header(header::COOKIE, cookie_a.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(format!(r#"["{tag_id}"]"#))).unwrap(),
+    ).await.unwrap();
+    assert_eq!(set_tags.status(), StatusCode::OK);
+
+    let export_response = app.clone().oneshot(
+        Request::builder().method("GET").uri("/api/account/export-all")
+            .header(header::COOKIE, cookie_a.clone())
+            .body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    let export_bytes = axum::body::to_bytes(export_response.into_body(), usize::MAX).await.unwrap();
+
+    let import_response = app.clone().oneshot(
+        Request::builder().method("POST").uri("/api/account/import-all")
+            .header(header::COOKIE, cookie_b.clone())
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(export_bytes)).unwrap(),
+    ).await.unwrap();
+    assert_eq!(import_response.status(), StatusCode::OK);
+
+    let b_export = app.clone().oneshot(
+        Request::builder().method("GET").uri("/api/account/export-all")
+            .header(header::COOKIE, cookie_b.clone())
+            .body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    let b_bytes = axum::body::to_bytes(b_export.into_body(), usize::MAX).await.unwrap();
+    let b: server::models::account::AccountExport = serde_json::from_slice(&b_bytes).unwrap();
+
+    // the whole import landed - the tag-name collision didn't roll back
+    // the character (or anything else) that came with it
+    assert_eq!(b.characters.len(), 1);
+    assert_eq!(b.characters[0].name, "Aeth");
+}

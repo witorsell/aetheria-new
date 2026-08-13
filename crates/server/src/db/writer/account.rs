@@ -79,16 +79,27 @@ impl Writer {
                 }
             }
 
-            // tags: dedup by name within this import, create fresh
+            // tags: dedup by name within this import, create fresh. `tags.name`
+            // carries a bare instance-wide UNIQUE constraint (not scoped by
+            // user_id - see migrations/0001_init.sql), so a name already used
+            // by *any* account on the instance would otherwise hard-fail this
+            // whole transaction. INSERT OR IGNORE plus a follow-up lookup means
+            // a collision reuses whichever row already holds that name instead
+            // of erroring - the import always succeeds, though an imported tag
+            // can end up shared with whoever originally owns that name.
             let mut tag_ids_by_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
             for c in &export.characters {
                 for tag_name in &c.tags {
                     if !tag_ids_by_name.contains_key(tag_name) {
                         let id = uuid::Uuid::new_v4().to_string();
-                        sqlx::query("INSERT INTO tags (user_id, id, name, color, created_at) VALUES (?, ?, ?, '', ?)")
+                        sqlx::query("INSERT OR IGNORE INTO tags (user_id, id, name, color, created_at) VALUES (?, ?, ?, '', ?)")
                             .bind(user_id).bind(&id).bind(tag_name).bind(now)
                             .execute(&mut *tx).await?;
-                        tag_ids_by_name.insert(tag_name.clone(), id);
+                        let actual_id: String = sqlx::query_scalar("SELECT id FROM tags WHERE name = ?")
+                            .bind(tag_name)
+                            .fetch_one(&mut *tx)
+                            .await?;
+                        tag_ids_by_name.insert(tag_name.clone(), actual_id);
                     }
                 }
             }
