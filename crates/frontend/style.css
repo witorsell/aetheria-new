@@ -854,6 +854,10 @@ button:disabled {
     opacity: 1;
     pointer-events: auto;
   }
+
+  .editor-tabs {
+    flex-wrap: wrap;
+  }
 }
 
 /* Landing Page Layout */
