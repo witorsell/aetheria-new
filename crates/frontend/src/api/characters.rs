@@ -395,6 +395,24 @@ pub async fn import_character(file: web_sys::File) -> Result<Character, String> 
         }
     }
 
+    // character card v2 spec's `tags: string[]` - create_tag reuses an
+    // existing tag of that name (case-insensitively) instead of erroring,
+    // so re-importing the same card twice doesn't pile up duplicates. capped
+    // like SillyTavern's own import (ANTI_TROLL_MAX_TAGS) since this list
+    // comes from an untrusted file.
+    const MAX_IMPORTED_TAGS: usize = 50;
+    if let Some(card_tags) = data.get("tags").and_then(|v| v.as_array()) {
+        let mut tag_ids = Vec::new();
+        for name in card_tags.iter().filter_map(|v| v.as_str()).map(str::trim).filter(|n| !n.is_empty()).take(MAX_IMPORTED_TAGS) {
+            if let Ok(tag) = create_tag(name, None).await {
+                tag_ids.push(tag.id);
+            }
+        }
+        if !tag_ids.is_empty() {
+            let _ = set_character_tags(&chara.id, &tag_ids).await;
+        }
+    }
+
     if let Some(book) = data.get("character_book") {
         let no_entries = Vec::new();
         let entries = book.get("entries").and_then(|v| v.as_array()).unwrap_or(&no_entries);

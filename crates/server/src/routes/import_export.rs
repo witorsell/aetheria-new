@@ -288,7 +288,29 @@ pub async fn export_character(
     if let Some(obj) = extensions.as_object_mut() {
         obj.insert("talkativeness".to_string(), json!(character.talkativeness));
     }
-    
+
+    let greetings: Vec<String> = crate::models::character::list_alternate_greetings(&state.db.read_pool, user_id, &id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|g| g.greeting)
+        .collect();
+
+    let tag_ids = crate::models::character::list_character_tags(&state.db.read_pool, user_id, &id)
+        .await
+        .unwrap_or_default();
+    let tag_names: Vec<String> = if tag_ids.is_empty() {
+        Vec::new()
+    } else {
+        crate::models::character::list_tags(&state.db.read_pool, user_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| tag_ids.contains(&t.id))
+            .map(|t| t.name)
+            .collect()
+    };
+
     let v2_json = json!({
         "spec": "chara_card_v2",
         "spec_version": "2.0",
@@ -302,10 +324,10 @@ pub async fn export_character(
             "creator_notes": "",
             "system_prompt": character.system_prompt,
             "post_history_instructions": character.post_history_instructions,
-            "tags": [],
+            "tags": tag_names,
             "creator": "",
             "character_version": "",
-            "alternate_greetings": [],
+            "alternate_greetings": greetings,
             "extensions": extensions
         }
     });
