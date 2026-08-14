@@ -162,9 +162,8 @@ pub async fn logout(
 pub struct MeResponse {
     pub username: String,
     pub display_name: Option<String>,
-    pub persona: Option<String>,
-    pub use_persona: bool,
     pub avatar_url: Option<String>,
+    pub active_persona_id: Option<String>,
 }
 
 pub async fn me(Extension(user_id): axum::extract::Extension<i64>, State(state): State<AppState>) -> Result<Json<MeResponse>, StatusCode> {
@@ -178,17 +177,14 @@ pub async fn me(Extension(user_id): axum::extract::Extension<i64>, State(state):
     Ok(Json(MeResponse {
         username: user.username,
         display_name: user.display_name,
-        persona: user.persona,
-        use_persona: user.use_persona,
         avatar_url: user.avatar_url,
+        active_persona_id: user.active_persona_id,
     }))
 }
 
 #[derive(serde::Deserialize)]
 pub struct UpdateMeRequest {
     pub display_name: Option<String>,
-    pub persona: Option<String>,
-    pub use_persona: bool,
 }
 
 pub async fn update_me(
@@ -196,7 +192,7 @@ pub async fn update_me(
     State(state): State<AppState>,
     Json(req): Json<UpdateMeRequest>,
 ) -> Result<Json<MeResponse>, StatusCode> {
-    state.db.writer.update_user(user_id, req.display_name, req.persona, req.use_persona)
+    state.db.writer.update_user(user_id, req.display_name)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

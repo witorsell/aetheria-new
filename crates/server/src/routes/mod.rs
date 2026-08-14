@@ -30,6 +30,7 @@ pub mod settings;
 pub mod import_export;
 pub mod proxy;
 pub mod lorebooks;
+pub mod personas;
 pub mod presets;
 pub mod themes;
 pub mod regex_scripts;
@@ -56,6 +57,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/folders/{id}", put(characters::update_folder).delete(characters::delete_folder))
         // avatar upload
         .route("/api/characters/{id}/avatar", post(characters::upload_avatar))
+        // personas
+        .route("/api/personas", get(personas::list).post(personas::create))
+        .route("/api/personas/{id}", axum::routing::patch(personas::update).delete(personas::delete))
+        .route("/api/personas/{id}/avatar", post(personas::upload_avatar))
+        .route("/api/personas/active", post(personas::set_active))
         // lorebooks
         .route("/api/lorebooks", get(lorebooks::list).post(lorebooks::create))
         .route("/api/lorebooks/{id}", get(lorebooks::get_lorebook).put(lorebooks::update).delete(lorebooks::delete_lorebook))

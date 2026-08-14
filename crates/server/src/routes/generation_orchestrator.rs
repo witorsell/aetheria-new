@@ -53,18 +53,21 @@ pub(crate) async fn fetch_user_persona(
     user_id: i64,
 ) -> Result<(String, Option<String>), crate::error::ApiError> {
     let user = crate::models::user::find_by_id(pool, user_id).await?;
-    let user_name = user
+    let fallback_name = user
         .as_ref()
         .and_then(|u| u.display_name.clone())
         .unwrap_or_else(|| user.as_ref().map(|u| u.username.clone()).unwrap_or_default());
-    let user_persona = user.as_ref().and_then(|u| {
-        if u.use_persona {
-            u.persona.clone()
-        } else {
-            None
-        }
-    });
-    Ok((user_name, user_persona))
+
+    let Some(active_id) = user.as_ref().and_then(|u| u.active_persona_id.clone()) else {
+        return Ok((fallback_name, None));
+    };
+
+    match crate::models::persona::get(pool, user_id, &active_id).await? {
+        Some(persona) => Ok((persona.name, Some(persona.description))),
+        // active_persona_id pointed at a persona that's gone (shouldn't
+        // happen, delete_persona clears the pointer, but don't 500 over it)
+        None => Ok((fallback_name, None)),
+    }
 }
 
 pub(crate) async fn resolve_lorebook_context(
