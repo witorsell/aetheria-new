@@ -144,4 +144,10 @@ async fn cannot_edit_or_delete_another_users_persona() {
         .await
         .unwrap();
     assert_eq!(delete_as_b.status(), StatusCode::NOT_FOUND);
+    // this used to be a bodiless 404 - make sure it's a real JSON error now,
+    // since the frontend reads resp.text() on failure and an empty body
+    // renders as no error at all
+    let delete_as_b_bytes = axum::body::to_bytes(delete_as_b.into_body(), usize::MAX).await.unwrap();
+    let delete_as_b_json: serde_json::Value = serde_json::from_slice(&delete_as_b_bytes).unwrap();
+    assert!(!delete_as_b_json["message"].as_str().unwrap_or_default().is_empty());
 }

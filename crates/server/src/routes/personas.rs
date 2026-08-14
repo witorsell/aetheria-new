@@ -65,7 +65,11 @@ pub async fn update(
             tracing::error!(error = %e, "failed to update persona");
             ApiError::internal("Failed to update persona")
         })?;
-    Ok(if updated { StatusCode::OK } else { StatusCode::NOT_FOUND })
+    if updated {
+        Ok(StatusCode::OK)
+    } else {
+        Err(ApiError::not_found("Persona not found"))
+    }
 }
 
 pub async fn delete(
@@ -82,7 +86,11 @@ pub async fn delete(
             tracing::error!(error = %e, "failed to delete persona");
             ApiError::internal("Failed to delete persona")
         })?;
-    Ok(if deleted { StatusCode::OK } else { StatusCode::NOT_FOUND })
+    if deleted {
+        Ok(StatusCode::OK)
+    } else {
+        Err(ApiError::not_found("Persona not found"))
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -104,7 +112,11 @@ pub async fn set_active(
             tracing::error!(error = %e, "failed to set active persona");
             ApiError::internal("Failed to set active persona")
         })?;
-    Ok(if ok { StatusCode::OK } else { StatusCode::NOT_FOUND })
+    if ok {
+        Ok(StatusCode::OK)
+    } else {
+        Err(ApiError::not_found("Persona not found"))
+    }
 }
 
 fn uploads_dir() -> PathBuf {
