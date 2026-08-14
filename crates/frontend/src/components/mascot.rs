@@ -29,12 +29,18 @@ impl MascotState {
 /// Aeth, the mascot. Hidden entirely via the `.mascot-disabled .mascot { display: none; }`
 /// rule in style.css when the active theme has `mascot_enabled: false`, so
 /// this component doesn't need to read `ThemeStore` itself.
+// bump this whenever any file in assets/mascot/ changes - cloudflare
+// caches image responses at the edge for hours regardless of browser
+// cache state, so the url itself has to change or a stale pop keeps
+// serving the old art indefinitely
+const MASCOT_ASSET_VERSION: u32 = 5;
+
 #[component]
 pub fn Aeth(#[prop(into)] state: Signal<MascotState>, #[prop(optional, into)] class: String) -> impl IntoView {
     view! {
         <img
             class=format!("mascot {}", class)
-            src=move || format!("/assets/mascot/{}.png", state.get().asset_name())
+            src=move || format!("/assets/mascot/{}.png?v={}", state.get().asset_name(), MASCOT_ASSET_VERSION)
             alt="Aeth"
         />
     }
