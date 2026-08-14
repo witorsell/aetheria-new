@@ -99,16 +99,13 @@ pub struct UpdateSettingsRequest {
 pub struct MeResponse {
     pub username: String,
     pub display_name: Option<String>,
-    pub persona: Option<String>,
-    pub use_persona: bool,
     pub avatar_url: Option<String>,
+    pub active_persona_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
 pub struct UpdateMeRequest {
     pub display_name: Option<String>,
-    pub persona: Option<String>,
-    pub use_persona: bool,
 }
 
 pub async fn get_settings() -> Result<SettingsView, String> {
