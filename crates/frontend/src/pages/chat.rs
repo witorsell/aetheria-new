@@ -52,10 +52,17 @@ pub fn ChatPage() -> impl IntoView {
     });
     
     // the tree doesn't carry the user's display name, so pull it off the /me
-    // response we already fetch for the avatar, falling back to username
-    // and then a plain "User" if neither is set.
+    // response we already fetch for the avatar. an active persona overrides
+    // the account name for {{user}}, same fallback order the backend uses
+    // in fetch_user_persona: persona name, then display name, then username,
+    // then a plain "User" if none of those are set.
     let user_name_sig = Signal::derive(move || {
         if let Some(m) = me.get().flatten() {
+            if let Some(pn) = m.persona_name {
+                if !pn.trim().is_empty() {
+                    return pn;
+                }
+            }
             if let Some(dn) = m.display_name {
                 if !dn.trim().is_empty() {
                     return dn;
@@ -68,7 +75,9 @@ pub fn ChatPage() -> impl IntoView {
         "User".to_string()
     });
 
-    let user_avatar_url = Signal::derive(move || me.get().flatten().and_then(|m| m.avatar_url));
+    let user_avatar_url = Signal::derive(move || {
+        me.get().flatten().and_then(|m| m.persona_avatar_url.or(m.avatar_url))
+    });
 
     let (show_chat_settings, set_show_chat_settings) = signal(false);
     let (pending_delete_message, set_pending_delete_message) = signal::<Option<String>>(None);

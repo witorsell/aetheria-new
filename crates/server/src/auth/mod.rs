@@ -164,6 +164,8 @@ pub struct MeResponse {
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub active_persona_id: Option<String>,
+    pub persona_name: Option<String>,
+    pub persona_avatar_url: Option<String>,
 }
 
 pub async fn me(Extension(user_id): axum::extract::Extension<i64>, State(state): State<AppState>) -> Result<Json<MeResponse>, StatusCode> {
@@ -174,11 +176,26 @@ pub async fn me(Extension(user_id): axum::extract::Extension<i64>, State(state):
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // same defensiveness as fetch_user_persona in generation_orchestrator: a
+    // dangling active_persona_id (persona got deleted) just falls through to
+    // None instead of failing the whole /me request
+    let mut persona_name = None;
+    let mut persona_avatar_url = None;
+    if let Some(active_id) = &user.active_persona_id {
+        if let Ok(Some(persona)) = crate::models::persona::get(&state.db.read_pool, user_id, active_id).await {
+            persona_name = Some(persona.name);
+            persona_avatar_url = persona.avatar_url;
+        }
+    }
+
     Ok(Json(MeResponse {
         username: user.username,
         display_name: user.display_name,
         avatar_url: user.avatar_url,
         active_persona_id: user.active_persona_id,
+        persona_name,
+        persona_avatar_url,
     }))
 }
 

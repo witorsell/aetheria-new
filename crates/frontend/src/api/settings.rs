@@ -101,6 +101,8 @@ pub struct MeResponse {
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
     pub active_persona_id: Option<String>,
+    pub persona_name: Option<String>,
+    pub persona_avatar_url: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
