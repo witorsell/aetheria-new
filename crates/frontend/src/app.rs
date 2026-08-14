@@ -21,8 +21,12 @@ use leptos_router::{ParamSegment, StaticSegment};
 pub fn NotFoundPage() -> impl IntoView {
     view! {
         <div style="display: flex; height: 100dvh; width: 100vw; flex-direction: column; align-items: center; justify-content: center; background: var(--color-bg); color: var(--color-text-muted); font-family: var(--font-body); text-align: center; padding: 2rem;">
-            <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 5rem; margin: 0; letter-spacing: -0.02em; color: var(--color-error);">"404"</h1>
-            <p style="font-size: 1.1rem; margin-top: 1rem;">"The void stares back. No page found."</p>
+            <div style="width: 170px;">
+                <crate::components::mascot::Aeth state=Signal::derive(|| crate::components::mascot::MascotState::Empty) class="mascot-empty" />
+            </div>
+            <p style="font-family: monospace; font-size: 0.75rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--color-text-muted); margin: 0.5rem 0 0;">"Error 404"</p>
+            <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 1.8rem; margin: 0.4rem 0 0; letter-spacing: -0.01em; color: var(--color-text-heading);">"Even Aeth couldn't find this one."</h1>
+            <p style="font-size: 1rem; margin-top: 0.75rem; max-width: 32ch;">"The page you're looking for doesn't exist, or moved."</p>
             <a href="/" style="margin-top: 2rem; color: var(--color-text); text-decoration: none; border-bottom: 1px dotted var(--color-border); padding-bottom: 0.2rem; font-family: monospace; font-size: 0.85rem; letter-spacing: 0.05em; text-transform: uppercase;">
                 "Return to Aetheria"
             </a>
