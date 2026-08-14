@@ -145,6 +145,20 @@ pub async fn list_character_tags(
     .await
 }
 
+/// every character-tag pairing for this user in one query, for the character
+/// list page - avoids a per-character round trip just to show tag badges.
+pub async fn list_all_character_tags(
+    pool: &sqlx::SqlitePool,
+    user_id: i64,
+) -> sqlx::Result<Vec<(String, String)>> {
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT character_id, tag_id FROM character_tags WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn list_folders(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<Vec<Folder>> {
     sqlx::query_as::<_, Folder>("SELECT * FROM folders WHERE user_id = ? ORDER BY name ASC")
         .bind(user_id)

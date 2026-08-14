@@ -50,6 +50,7 @@ pub fn build_router(state: AppState) -> Router {
         // character tags
         .route("/api/characters/{id}/tags", get(characters::list_character_tags).put(characters::set_character_tags))
         // tags
+        .route("/api/character-tags", get(characters::list_all_character_tags))
         .route("/api/tags", get(characters::list_tags).post(characters::create_tag))
         .route("/api/tags/{id}", delete(characters::delete_tag))
         // folders

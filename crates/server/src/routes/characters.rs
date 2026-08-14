@@ -250,6 +250,7 @@ pub async fn create_tag(
     State(state): State<AppState>,
     Json(input): Json<TagInput>,
 ) -> Result<Json<Tag>, ApiError> {
+    validate_tag_input(&input)?;
     state
         .db
         .writer
@@ -277,6 +278,18 @@ pub async fn delete_tag(
             ApiError::internal("Failed to delete tag")
         })?;
     Ok(if deleted { StatusCode::OK } else { StatusCode::NOT_FOUND })
+}
+
+pub async fn list_all_character_tags(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+) -> Result<Json<std::collections::HashMap<String, Vec<String>>>, ApiError> {
+    let pairs = crate::models::character::list_all_character_tags(&state.db.read_pool, user_id).await?;
+    let mut by_character: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for (character_id, tag_id) in pairs {
+        by_character.entry(character_id).or_default().push(tag_id);
+    }
+    Ok(Json(by_character))
 }
 
 pub async fn list_character_tags(
@@ -323,6 +336,7 @@ pub async fn create_folder(
     State(state): State<AppState>,
     Json(input): Json<FolderInput>,
 ) -> Result<Json<Folder>, ApiError> {
+    validate_folder_input(&input)?;
     state
         .db
         .writer
@@ -341,6 +355,7 @@ pub async fn update_folder(
     Path(id): Path<String>,
     Json(input): Json<FolderInput>,
 ) -> Result<StatusCode, ApiError> {
+    validate_folder_input(&input)?;
     let updated = state
         .db
         .writer
