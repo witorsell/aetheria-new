@@ -419,27 +419,48 @@ pub fn CharacterEditorPage() -> impl IntoView {
                                     let id = t.id.clone();
                                     let id2 = t.id.clone();
                                     let id3 = t.id.clone();
+                                    let id4 = t.id.clone();
                                     let color = t.color.clone();
+                                    let name = t.name.clone();
 
                                     view! {
-                                        <label style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--color-border); cursor: pointer; transition: background 0.2s;"
+                                        <div style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--color-border); transition: background 0.2s;"
                                             class:active=move || selected_tags.get().contains(&id)>
-                                            <input type="checkbox"
-                                                prop:checked=move || selected_tags.get().contains(&id3)
-                                                on:change=move |ev| {
-                                                    let checked = event_target_checked(&ev);
-                                                    set_selected_tags.update(|set: &mut HashSet<String>| {
-                                                        if checked {
-                                                            set.insert(id2.clone());
-                                                        } else {
-                                                            set.remove(&id2);
+                                            <label style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem; cursor: pointer; flex: 1; min-width: 0;">
+                                                <input type="checkbox"
+                                                    prop:checked=move || selected_tags.get().contains(&id3)
+                                                    on:change=move |ev| {
+                                                        let checked = event_target_checked(&ev);
+                                                        set_selected_tags.update(|set: &mut HashSet<String>| {
+                                                            if checked {
+                                                                set.insert(id2.clone());
+                                                            } else {
+                                                                set.remove(&id2);
+                                                            }
+                                                        });
+                                                    }
+                                                />
+                                                <span style=format!("display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: {color}; flex-shrink: 0;")></span>
+                                                <span>{name.clone()}</span>
+                                            </label>
+                                            <button type="button" class="danger small" title="Delete this tag everywhere"
+                                                on:click=move |_| {
+                                                    let id_for_delete = id4.clone();
+                                                    let name_for_confirm = name.clone();
+                                                    if let Some(win) = web_sys::window() {
+                                                        if !win.confirm_with_message(&format!("Delete the tag \"{}\"? This removes it from every character that has it.", name_for_confirm)).unwrap_or(false) {
+                                                            return;
+                                                        }
+                                                    }
+                                                    spawn_local(async move {
+                                                        if api::delete_tag(&id_for_delete).await.is_ok() {
+                                                            set_all_tags.update(|list| list.retain(|t| t.id != id_for_delete));
+                                                            set_selected_tags.update(|set| { set.remove(&id_for_delete); });
                                                         }
                                                     });
                                                 }
-                                            />
-                                            <span style=format!("display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: {color};")></span>
-                                            <span>{t.name.clone()}</span>
-                                        </label>
+                                            >"✕"</button>
+                                        </div>
                                     }
                                 }).collect::<Vec<_>>()}
                             </div>
