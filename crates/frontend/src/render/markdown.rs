@@ -196,22 +196,29 @@ fn render_markdown_blocks(text: &str, blocks: &mut Vec<AnyView>, forbid_media: b
                 }
             }
             Event::Start(Tag::Link { dest_url, title, .. }) => {
-                link_url = Some(dest_url.to_string());
+                // same sanitize_url used for raw <a href> in safe_html.rs - markdown link
+                // syntax was going straight to href with no scheme check, a javascript:
+                // link in a shared/imported character card. the CSP (script-src 'self'
+                // 'wasm-unsafe-eval', no unsafe-inline) already blocks javascript: nav
+                // in Chromium-family browsers as a second layer, but fix it at the source.
+                link_url = crate::render::safe_html::sanitize_url(&dest_url);
                 link_title = Some(title.to_string());
                 link_inline_start = Some(inline.len());
             }
             Event::End(TagEnd::Link) => {
                 if let Some(start_len) = link_inline_start.take() {
                     let children = inline.drain(start_len..).collect_view();
-                    if let Some(url) = link_url.take() {
-                        let title = link_title.take().unwrap_or_default();
-                        let view = view! {
+                    let title = link_title.take().unwrap_or_default();
+                    let view = match link_url.take() {
+                        Some(url) => view! {
                             <a href=url title=title target="_blank" rel="noopener noreferrer" style="color: #00DFD8; text-decoration: underline;">
                                 {children}
                             </a>
-                        }.into_any();
-                        inline.push(view);
-                    }
+                        }.into_any(),
+                        // an unsafe/relative href: still show the content, just not as a link.
+                        None => view! { <span>{children}</span> }.into_any(),
+                    };
+                    inline.push(view);
                 }
             }
             Event::Start(Tag::List(start_num)) => {
@@ -374,8 +381,8 @@ mod tests {
 //
 // run with:
 //   cd crates/frontend
-//   CHROMEDRIVER=/usr/bin/chromedriver cARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
-//     cargo test --target wasm32-unknown-unknown --lib render::markdown::dom_tests
+//   CHROMEDRIVER=/usr/bin/chromedriver CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+//     cargo test --target wasm32-unknown-unknown --bin frontend render::markdown::dom_tests
 #[cfg(all(test, target_arch = "wasm32"))]
 mod dom_tests {
     use super::*;
@@ -503,5 +510,29 @@ mod dom_tests {
             .unwrap()
             .expect("the fenced code block should be nested inside the <li>, not a sibling");
         assert_eq!(code.text_content().unwrap_or_default().trim(), "let x = 1;");
+    }
+
+    #[wasm_bindgen_test]
+    fn a_javascript_scheme_link_renders_inert_not_as_an_anchor() {
+        let container = mount("[click me](javascript:alert(1))");
+
+        assert!(
+            container.query_selector("a").unwrap().is_none(),
+            "a javascript: link should not render as an <a> at all, got: {}",
+            container.inner_html()
+        );
+        let text = container.text_content().unwrap_or_default();
+        assert!(text.contains("click me"), "link text should still render, got: {text}");
+    }
+
+    #[wasm_bindgen_test]
+    fn an_https_link_still_renders_as_a_real_anchor() {
+        let container = mount("[click me](https://example.com/)");
+
+        let link = container
+            .query_selector("a")
+            .unwrap()
+            .expect("a normal https link should still render as an <a>");
+        assert_eq!(link.get_attribute("href").unwrap_or_default(), "https://example.com/");
     }
 }

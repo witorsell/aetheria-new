@@ -10,7 +10,7 @@ fn is_allowed_tag(name: &str) -> bool {
 }
 
 // only absolute http(s), no javascript:/data:/relative paths
-fn sanitize_url(raw: &str) -> Option<String> {
+pub(super) fn sanitize_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     let lower = trimmed.to_ascii_lowercase();
     if lower.starts_with("http://") || lower.starts_with("https://") {
