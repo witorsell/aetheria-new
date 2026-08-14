@@ -4,6 +4,7 @@ pub mod character;
 pub mod lorebook;
 pub mod memory_chunk;
 pub mod message;
+pub mod persona;
 pub mod preset;
 pub mod regex_script;
 pub mod settings;
