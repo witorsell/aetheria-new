@@ -22,8 +22,17 @@ async fn legacy_persona_becomes_default_and_active() {
         .await
         .unwrap();
 
-    // re-run just this migration's backfill logic directly, since the
-    // migrator already ran once during connect() before the row above existed
+    // manually run backfill since the migrator already ran before we set the persona
+    // also verify our inline SQL matches the actual migration file so changes don't silently drift
+    let migration_content = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("migrations/0029_persona_library.sql")
+    ).expect("migration file should exist");
+    assert!(
+        migration_content.contains("use_persona = 1 AND persona IS NOT NULL AND trim(persona) != ''"),
+        "migration file's backfill WHERE clause changed; update this test to match"
+    );
+
     sqlx::query(
         "INSERT INTO personas (id, user_id, name, description, avatar_url, created_at, updated_at)
          SELECT lower(hex(randomblob(16))), id, 'Default', persona, NULL, 0, 0
