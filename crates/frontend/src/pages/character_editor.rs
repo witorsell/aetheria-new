@@ -10,6 +10,7 @@ enum EditorTab {
     Prompting,
     Greetings,
     Lorebooks,
+    Tags,
 }
 
 #[component]
@@ -42,6 +43,9 @@ pub fn CharacterEditorPage() -> impl IntoView {
     let (alternate_greetings, set_alternate_greetings) = signal(Vec::<api::AlternateGreeting>::new());
     let (all_lorebooks, set_all_lorebooks) = signal(Vec::<api::Lorebook>::new());
     let (selected_lorebooks, set_selected_lorebooks) = signal(HashSet::<String>::new());
+    let (all_tags, set_all_tags) = signal(Vec::<api::Tag>::new());
+    let (selected_tags, set_selected_tags) = signal(HashSet::<String>::new());
+    let (new_tag_name, set_new_tag_name) = signal(String::new());
     let (new_greeting, set_new_greeting) = signal(String::new());
     let (error, set_error) = signal(Option::<String>::None);
     let (success, set_success) = signal(Option::<String>::None);
@@ -77,6 +81,10 @@ pub fn CharacterEditorPage() -> impl IntoView {
                             Ok(ids) => set_selected_lorebooks.set(ids.into_iter().collect()),
                             Err(_) => {}
                         }
+                        match api::get_character_tags(&cid).await {
+                            Ok(ids) => set_selected_tags.set(ids.into_iter().collect()),
+                            Err(_) => {}
+                        }
                     }
                     Err(e) => set_error.set(Some(e)),
                 }
@@ -86,6 +94,10 @@ pub fn CharacterEditorPage() -> impl IntoView {
             }
             match api::list_lorebooks().await {
                 Ok(lbs) => set_all_lorebooks.set(lbs),
+                Err(_) => {}
+            }
+            match api::list_tags().await {
+                Ok(tags) => set_all_tags.set(tags),
                 Err(_) => {}
             }
         }
@@ -117,6 +129,10 @@ pub fn CharacterEditorPage() -> impl IntoView {
                         class:active=move || tab.get() == EditorTab::Lorebooks
                         on:click=move |_| set_tab.set(EditorTab::Lorebooks)
                     >"Grimoires"</button>
+                    <button
+                        class:active=move || tab.get() == EditorTab::Tags
+                        on:click=move |_| set_tab.set(EditorTab::Tags)
+                    >"Tags"</button>
                 </div>
 
                 <form on:submit={
@@ -179,6 +195,8 @@ pub fn CharacterEditorPage() -> impl IntoView {
                                 }
                                 let selected_lbs: Vec<String> = selected_lorebooks.get_untracked().into_iter().collect();
                                 let _ = api::set_character_lorebooks(&id, selected_lbs).await;
+                                let selected_tag_ids: Vec<String> = selected_tags.get_untracked().into_iter().collect();
+                                let _ = api::set_character_tags(&id, &selected_tag_ids).await;
                             }
                             Err(e) => set_error.set(Some(e)),
                         }
@@ -364,7 +382,7 @@ pub fn CharacterEditorPage() -> impl IntoView {
                                     let id4 = lb.id.clone();
                                     
                                     view! {
-                                        <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--color-border); cursor: pointer; transition: background 0.2s;"
+                                        <label style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--color-border); cursor: pointer; transition: background 0.2s;"
                                             class:active=move || selected_lorebooks.get().contains(&id3)>
                                             <input type="checkbox" 
                                                 prop:checked=move || selected_lorebooks.get().contains(&id4)
@@ -386,6 +404,71 @@ pub fn CharacterEditorPage() -> impl IntoView {
                                         </label>
                                     }
                                 }).collect::<Vec<_>>()}
+                            </div>
+                        </div>
+                    </Show>
+
+                    <Show when=move || tab.get() == EditorTab::Tags>
+                        <div class="tab-content">
+                            <label style="margin-bottom: 0.5rem; display: block; font-weight: 500;">"Tags"</label>
+                            <div style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 400px; overflow-y: auto; padding: 0.5rem; border: 1px solid var(--color-border);">
+                                <Show when=move || all_tags.get().is_empty()>
+                                    <p class="muted">"No tags yet. Create one below."</p>
+                                </Show>
+                                {move || all_tags.get().into_iter().map(|t| {
+                                    let id = t.id.clone();
+                                    let id2 = t.id.clone();
+                                    let id3 = t.id.clone();
+                                    let color = t.color.clone();
+
+                                    view! {
+                                        <label style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--color-border); cursor: pointer; transition: background 0.2s;"
+                                            class:active=move || selected_tags.get().contains(&id)>
+                                            <input type="checkbox"
+                                                prop:checked=move || selected_tags.get().contains(&id3)
+                                                on:change=move |ev| {
+                                                    let checked = event_target_checked(&ev);
+                                                    set_selected_tags.update(|set: &mut HashSet<String>| {
+                                                        if checked {
+                                                            set.insert(id2.clone());
+                                                        } else {
+                                                            set.remove(&id2);
+                                                        }
+                                                    });
+                                                }
+                                            />
+                                            <span style=format!("display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: {color};")></span>
+                                            <span>{t.name.clone()}</span>
+                                        </label>
+                                    }
+                                }).collect::<Vec<_>>()}
+                            </div>
+
+                            <div class="add-greeting" style="margin-top: 0.75rem;">
+                                <input
+                                    type="text"
+                                    placeholder="New tag name…"
+                                    prop:value=new_tag_name
+                                    on:input=move |ev| set_new_tag_name.set(event_target_value(&ev))
+                                />
+                                <button type="button" class="secondary" on:click=move |_| {
+                                    let name = new_tag_name.get_untracked();
+                                    if name.trim().is_empty() {
+                                        return;
+                                    }
+                                    spawn_local(async move {
+                                        match api::create_tag(&name, None).await {
+                                            Ok(tag) => {
+                                                set_selected_tags.update(|set| { set.insert(tag.id.clone()); });
+                                                set_all_tags.update(|list| list.push(tag));
+                                                set_new_tag_name.set(String::new());
+                                            }
+                                            Err(e) => set_error.set(Some(e)),
+                                        }
+                                    });
+                                }>
+                                    "Add"
+                                </button>
                             </div>
                         </div>
                     </Show>

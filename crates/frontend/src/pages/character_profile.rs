@@ -26,6 +26,18 @@ pub fn CharacterProfilePage() -> impl IntoView {
         async move { crate::api::list_alternate_greetings(&id).await.unwrap_or_default() }
     });
 
+    let tags: LocalResource<Vec<crate::api::Tag>> = LocalResource::new(move || {
+        let id = id();
+        async move {
+            let tag_ids = crate::api::get_character_tags(&id).await.unwrap_or_default();
+            if tag_ids.is_empty() {
+                return Vec::new();
+            }
+            let all = crate::api::list_tags().await.unwrap_or_default();
+            all.into_iter().filter(|t| tag_ids.contains(&t.id)).collect()
+        }
+    });
+
     view! {
         <div class="dossier-page">
             <Suspense fallback=|| view! { <div class="dossier-loading">"Loading..."</div> }>
@@ -33,8 +45,9 @@ pub fn CharacterProfilePage() -> impl IntoView {
                     let nav = nav.clone();
                     let char_opt = character.get().flatten();
                     let greets = greetings.get().unwrap_or_default();
+                    let char_tags = tags.get().unwrap_or_default();
                     char_opt.map(move |char| {
-                        view! { <CharacterDossier char=char nav=nav.clone() greetings=greets.clone() /> }
+                        view! { <CharacterDossier char=char nav=nav.clone() greetings=greets.clone() tags=char_tags.clone() /> }
                     })
                 }}
             </Suspense>
@@ -43,7 +56,7 @@ pub fn CharacterProfilePage() -> impl IntoView {
 }
 
 #[component]
-fn CharacterDossier(char: Character, nav: NavFn, greetings: Vec<crate::api::AlternateGreeting>) -> impl IntoView {
+fn CharacterDossier(char: Character, nav: NavFn, greetings: Vec<crate::api::AlternateGreeting>, tags: Vec<crate::api::Tag>) -> impl IntoView {
     let file_no = char.id
         .replace('-', "")
         .chars()
@@ -139,6 +152,24 @@ fn CharacterDossier(char: Character, nav: NavFn, greetings: Vec<crate::api::Alte
 
                 <div class="dossier-body">
                     <h1 class="dossier-name">{char_name}</h1>
+
+                    {if tags.is_empty() {
+                        view! {}.into_any()
+                    } else {
+                        view! {
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; margin: -0.5rem 0 1.5rem;">
+                                {tags.into_iter().map(|t| view! {
+                                    <span style=format!(
+                                        "display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid {}; font-size: 0.8rem; color: var(--color-text-muted);",
+                                        t.color
+                                    )>
+                                        <span style=format!("width: 0.5rem; height: 0.5rem; border-radius: 50%; background: {};", t.color)></span>
+                                        {t.name}
+                                    </span>
+                                }).collect::<Vec<_>>()}
+                            </div>
+                        }.into_any()
+                    }}
 
                     <div class="dossier-content">
                         {if has_description {

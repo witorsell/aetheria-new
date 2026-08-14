@@ -224,6 +224,28 @@ pub async fn delete_tag(id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+pub async fn get_character_tags(character_id: &str) -> Result<Vec<String>, String> {
+    Request::get(&format!("/api/characters/{character_id}/tags"))
+        .credentials(web_sys::RequestCredentials::Include)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn list_all_character_tags() -> Result<std::collections::HashMap<String, Vec<String>>, String> {
+    Request::get("/api/character-tags")
+        .credentials(web_sys::RequestCredentials::Include)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 pub async fn set_character_tags(character_id: &str, tag_ids: &[String]) -> Result<(), String> {
     Request::put(&format!("/api/characters/{character_id}/tags"))
         .header("Content-Type", "application/json")
