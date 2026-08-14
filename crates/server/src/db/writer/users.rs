@@ -87,16 +87,12 @@ impl Writer {
     pub async fn update_user(
         &self, user_id: i64,
         display_name: Option<String>,
-        persona: Option<String>,
-        use_persona: bool,
     ) -> sqlx::Result<()> {
         self.dispatch(move |conn| Box::pin(async move {
             sqlx::query(
-                "UPDATE users SET display_name = ?, persona = ?, use_persona = ? WHERE id = ?",
+                "UPDATE users SET display_name = ? WHERE id = ?",
             )
             .bind(display_name)
-            .bind(persona)
-            .bind(use_persona)
             .bind(user_id)
             .execute(&mut *conn)
             .await

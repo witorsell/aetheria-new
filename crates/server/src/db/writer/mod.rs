@@ -68,6 +68,7 @@ mod groups;
 mod lorebooks;
 mod memory;
 mod messages;
+mod personas;
 mod presets;
 mod regex_scripts;
 mod sessions;
