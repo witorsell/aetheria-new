@@ -16,6 +16,8 @@ This is the Rust rewrite of Aetheria, my old fork of Agnaistic, into a high-perf
 
 Aetheria is an in-progress local roleplay/chat interface. It keeps everything in a local SQLite DB so nothing goes anywhere except the actual LLM API calls. One binary, one process, no node_modules.
 
+> **heads up:** this is a solo side project, still very much a work in progress and far from feature-complete. code quality varies, things are missing, and stuff will change without notice.
+
 ## One-click deploy
 
 ```bash
