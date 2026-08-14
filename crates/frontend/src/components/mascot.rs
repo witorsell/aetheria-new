@@ -7,6 +7,7 @@ pub enum MascotState {
     Thinking,
     Error,
     Empty,
+    Lost,
     Peek,
     PeekClicked,
 }
@@ -18,6 +19,7 @@ impl MascotState {
             MascotState::Thinking => "thinking",
             MascotState::Error => "error",
             MascotState::Empty => "empty",
+            MascotState::Lost => "lost",
             MascotState::Peek => "peek",
             MascotState::PeekClicked => "peek-clicked",
         }
