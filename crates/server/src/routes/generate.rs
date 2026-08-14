@@ -146,15 +146,21 @@ pub async fn continue_generation(Extension(user_id): Extension<i64>,
     let raw_prompt = prepared.raw_prompt;
     let prompt_tokens = prepared.prompt_tokens;
     let context_limit = prepared.context_limit;
-    let accumulated = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
-    let accumulated_for_stream = accumulated.clone();
+    let state_for_memory = state.clone();
+    let chat_id_for_memory = chat_id.clone();
 
-    let sse_stream = provider_stream.then(move |item| {
-        let accumulated = accumulated_for_stream.clone();
-        async move {
-            match item {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+
+    // runs to completion in its own task regardless of whether the client is
+    // still reading the SSE response, same fix as run_generation - otherwise
+    // a dropped connection loses the reply and the save that would record it.
+    tokio::spawn(async move {
+        let mut provider_stream = provider_stream;
+        let mut accumulated = String::new();
+        while let Some(item) = provider_stream.next().await {
+            let event = match item {
                 Ok(delta) => {
-                    accumulated.lock().await.push_str(&delta);
+                    accumulated.push_str(&delta);
                     Ok(Event::default().data(delta))
                 }
                 Err(ProviderError::Request(e)) => {
@@ -163,24 +169,34 @@ pub async fn continue_generation(Extension(user_id): Extension<i64>,
                 Err(ProviderError::Status(code, body)) => {
                     Ok(Event::default().event("error").data(format!("{code}: {body}")))
                 }
-            }
+            };
+            let _ = tx.send(event).await;
         }
-    });
 
-    let finishing_stream = sse_stream.chain(futures_util::stream::once(async move {
-        let final_content = accumulated.lock().await.clone();
-        if !final_content.is_empty() {
-            if let Err(e) = writer
-                .continue_message(user_id, last_id, final_content, raw_prompt, prompt_tokens, context_limit)
+        if !accumulated.is_empty() {
+            match writer
+                .continue_message(user_id, last_id, accumulated, raw_prompt, prompt_tokens, context_limit)
                 .await
             {
-                tracing::error!(error = %e, "failed to continue message");
+                Ok(_) => {
+                    tokio::spawn(async move {
+                        crate::memory::maybe_update_chat_summary(&state_for_memory, user_id, &chat_id_for_memory).await;
+                        crate::vector_memory::maybe_index_chat(&state_for_memory, user_id, &chat_id_for_memory).await;
+                    });
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to continue message");
+                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
+                    return;
+                }
             }
         }
-        Ok(Event::default().event("done").data(""))
-    }));
+        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+    });
 
-    Ok(Sse::new(finishing_stream).keep_alive(KeepAlive::default()))
+    let event_stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+
+    Ok(Sse::new(event_stream).keep_alive(KeepAlive::default()))
 }
 
 #[derive(Deserialize)]
@@ -231,15 +247,22 @@ pub async fn respond_as_user(
     let raw_prompt = prepared.raw_prompt;
     let prompt_tokens = prepared.prompt_tokens;
     let context_limit = prepared.context_limit;
-    let accumulated = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
-    let accumulated_for_stream = accumulated.clone();
+    let chat_id_for_finish = chat_id.clone();
+    let state_for_memory = state.clone();
+    let chat_id_for_memory = chat_id.clone();
 
-    let sse_stream = provider_stream.then(move |item| {
-        let accumulated = accumulated_for_stream.clone();
-        async move {
-            match item {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+
+    // runs to completion in its own task regardless of whether the client is
+    // still reading the SSE response, same fix as run_generation - otherwise
+    // a dropped connection loses the reply and the save that would record it.
+    tokio::spawn(async move {
+        let mut provider_stream = provider_stream;
+        let mut accumulated = String::new();
+        while let Some(item) = provider_stream.next().await {
+            let event = match item {
                 Ok(delta) => {
-                    accumulated.lock().await.push_str(&delta);
+                    accumulated.push_str(&delta);
                     Ok(Event::default().data(delta))
                 }
                 Err(ProviderError::Request(e)) => {
@@ -250,31 +273,40 @@ pub async fn respond_as_user(
                         .event("error")
                         .data(format!("{code}: {body}")))
                 }
-            }
+            };
+            let _ = tx.send(event).await;
         }
-    });
 
-    let chat_id_for_finish = chat_id.clone();
-    let finishing_stream = sse_stream.chain(futures_util::stream::once(async move {
-        let final_content = accumulated.lock().await.clone();
-        if !final_content.is_empty() {
-            if let Err(e) = writer
+        if !accumulated.is_empty() {
+            match writer
                 .create_user_message_with_prompt(user_id, chat_id_for_finish,
                     Some(parent_id_for_reply),
-                    final_content,
+                    accumulated,
                     raw_prompt,
                     prompt_tokens,
                     context_limit,
                 )
                 .await
             {
-                tracing::error!(error = %e, "failed to save user message");
+                Ok(_) => {
+                    tokio::spawn(async move {
+                        crate::memory::maybe_update_chat_summary(&state_for_memory, user_id, &chat_id_for_memory).await;
+                        crate::vector_memory::maybe_index_chat(&state_for_memory, user_id, &chat_id_for_memory).await;
+                    });
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to save user message");
+                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
+                    return;
+                }
             }
         }
-        Ok(Event::default().event("done").data(""))
-    }));
+        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+    });
 
-    Ok(Sse::new(finishing_stream).keep_alive(KeepAlive::default()))
+    let event_stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
+
+    Ok(Sse::new(event_stream).keep_alive(KeepAlive::default()))
 }
 
 #[derive(Deserialize)]
