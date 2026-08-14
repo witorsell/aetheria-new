@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="0" y="0" width="64" height="64" rx="15" fill="#0e0a18"/>
+
+  <!-- crescent curl at hood peak -->
+  <path d="M30,15
+           C 26,8 29,2 36,2
+           C 32,5 31,9 33,13
+           C 32,13.6 31,14.3 30,15 Z"
+        fill="#8a6bff"/>
+
+  <!-- cloak / hood body -->
+  <path d="M32,11
+           C 25,11 20,17 18,25
+           C 14,33 10,42 10,53
+           C 22,59 42,59 54,53
+           C 54,42 50,33 46,25
+           C 44,17 39,11 32,11 Z"
+        fill="#7c5cff"/>
+
+  <!-- face shadow -->
+  <ellipse cx="32" cy="28" rx="9.5" ry="8.5" fill="#f2ecff"/>
+
+  <!-- eyes -->
+  <circle cx="28.5" cy="28" r="1.8" fill="#3a2a66"/>
+  <circle cx="35.5" cy="28" r="1.8" fill="#3a2a66"/>
+
+  <!-- chest sparkle -->
+  <path d="M32,39 L34.2,44.2 L39,46.5 L34.2,48.8 L32,54 L29.8,48.8 L25,46.5 L29.8,44.2 Z"
+        fill="#ff9ecf"/>
+</svg>
