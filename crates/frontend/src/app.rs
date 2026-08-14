@@ -20,10 +20,10 @@ use leptos_router::{ParamSegment, StaticSegment};
 #[component]
 pub fn NotFoundPage() -> impl IntoView {
     view! {
-        <div style="display: flex; height: 100vh; width: 100vw; flex-direction: column; align-items: center; justify-content: center; background: #0b0b0e; color: #a89fc2; font-family: monospace;">
-            <h1 style="font-size: 5rem; margin: 0; color: #ff4444;">"404"</h1>
-            <p style="font-size: 1.2rem; margin-top: 1rem;">"The void stares back. No page found."</p>
-            <a href="/" style="margin-top: 2rem; color: #ffffff; text-decoration: none; border-bottom: 1px solid #333339; padding-bottom: 0.2rem; transition: all 0.2s;">
+        <div style="display: flex; height: 100dvh; width: 100vw; flex-direction: column; align-items: center; justify-content: center; background: var(--color-bg); color: var(--color-text-muted); font-family: var(--font-body); text-align: center; padding: 2rem;">
+            <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 5rem; margin: 0; letter-spacing: -0.02em; color: var(--color-error);">"404"</h1>
+            <p style="font-size: 1.1rem; margin-top: 1rem;">"The void stares back. No page found."</p>
+            <a href="/" style="margin-top: 2rem; color: var(--color-text); text-decoration: none; border-bottom: 1px dotted var(--color-border); padding-bottom: 0.2rem; font-family: monospace; font-size: 0.85rem; letter-spacing: 0.05em; text-transform: uppercase;">
                 "Return to Aetheria"
             </a>
         </div>
