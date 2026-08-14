@@ -203,8 +203,13 @@ pub(super) fn PersonaManager() -> impl IntoView {
                                                 <button on:click=move |_| {
                                                     let id = id_for_activate.clone();
                                                     spawn_local(async move {
-                                                        let _ = crate::api::set_active_persona(Some(id)).await;
-                                                        me.refetch();
+                                                        match crate::api::set_active_persona(Some(id)).await {
+                                                            Ok(()) => {
+                                                                set_error.set(String::new());
+                                                                me.refetch();
+                                                            }
+                                                            Err(e) => set_error.set(e),
+                                                        }
                                                     });
                                                 }>"Activate"</button>
                                             }.into_any()
@@ -212,9 +217,14 @@ pub(super) fn PersonaManager() -> impl IntoView {
                                         <button on:click=move |_| {
                                             let id = id_for_delete.clone();
                                             spawn_local(async move {
-                                                let _ = crate::api::delete_persona(&id).await;
-                                                personas.refetch();
-                                                me.refetch();
+                                                match crate::api::delete_persona(&id).await {
+                                                    Ok(()) => {
+                                                        set_error.set(String::new());
+                                                        personas.refetch();
+                                                        me.refetch();
+                                                    }
+                                                    Err(e) => set_error.set(e),
+                                                }
                                             });
                                         }>"Delete"</button>
                                     </div>
