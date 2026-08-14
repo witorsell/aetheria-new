@@ -74,8 +74,8 @@ pub fn PresetsPage() -> impl IntoView {
                             let active_id = active_id.clone();
                             view! {
                                 <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 2.5rem;">
-                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid var(--color-border);">
-                                        <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid var(--color-border); flex-wrap: wrap;">
+                                        <div style="flex: 1; min-width: 0;">
                                             <div style="font-size: 1.1rem; font-family: var(--font-heading);">"aetheria's own assembly"</div>
                                             <div style="color: var(--color-text-muted); font-size: 0.875rem;">"No preset active"</div>
                                         </div>
@@ -98,8 +98,8 @@ pub fn PresetsPage() -> impl IntoView {
                                         let preset_id_for_export = p.id.clone();
                                         let preset_name_for_export = p.name.clone();
                                         view! {
-                                            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid var(--color-border);">
-                <div style="flex: 1;">
+                                            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid var(--color-border); flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 0;">
                                                     <a href=format!("/presets/{}/edit", p.id) style="text-decoration: none; color: inherit;">
                                                         <div style="font-size: 1.1rem; font-family: var(--font-heading);">{p.name.clone()}</div>
                                                         <div style="color: var(--color-text-muted); font-size: 0.875rem;">{format!("{} prompt slots, {} enabled", p.prompts.len(), p.prompt_order.iter().filter(|e| e.enabled).count())}</div>
@@ -159,8 +159,8 @@ pub fn PresetsPage() -> impl IntoView {
                                 let id_for_delete = s.id.clone();
                                 let currently_disabled = s.disabled;
                                 view! {
-                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid var(--color-border);">
-                                        <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid var(--color-border); flex-wrap: wrap;">
+                                        <div style="flex: 1; min-width: 0;">
                                             <div style="font-size: 1.1rem; font-family: var(--font-heading);">{s.script_name.clone()}</div>
                                             <div style="color: var(--color-text-muted); font-size: 0.8rem; font-family: monospace; word-break: break-all;">{s.find_regex.clone()}</div>
                                         </div>

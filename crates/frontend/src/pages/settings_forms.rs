@@ -214,13 +214,13 @@ pub(super) fn PersonaManager() -> impl IntoView {
                                 let id_for_delete = p.id.clone();
                                 let name_for_delete = p.name.clone();
                                 view! {
-                                    <div style="display: flex; align-items: center; gap: 1rem; padding: 0.75rem; border: 1px solid var(--color-border); background: rgba(0,0,0,0.15);">
+                                    <div style="display: flex; align-items: center; gap: 1rem; padding: 0.75rem; border: 1px solid var(--color-border); background: rgba(0,0,0,0.15); flex-wrap: wrap;">
                                         {p.avatar_url.clone().map(|url| view! {
-                                            <img src=url style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;" />
+                                            <img src=url style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px; flex-shrink: 0;" />
                                         })}
-                                        <div style="flex: 1;">
+                                        <div style="flex: 1; min-width: 0;">
                                             <div style="font-weight: 600;">{p.name.clone()}</div>
-                                            <div style="font-size: 0.85rem; color: var(--color-text-muted); max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{p.description.clone()}</div>
+                                            <div style="font-size: 0.85rem; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{p.description.clone()}</div>
                                         </div>
                                         {if is_active {
                                             view! {

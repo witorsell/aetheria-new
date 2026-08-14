@@ -368,31 +368,6 @@ pub fn SettingsPage() -> impl IntoView {
                 {move || export_import_error.get().map(|e| view! { <span style="color: #ff4444; font-family: monospace; font-size: 0.85rem;">{e}</span> })}
             </div>
 
-            <div style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--color-error);">
-                <h3 style="color: var(--color-error); font-family: monospace; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 1rem;">"Danger Zone"</h3>
-                <div style="display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <button type="button" on:click=on_export_account style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
-                        "Export My Data"
-                    </button>
-                    <label style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
-                        "Import Data"
-                        <input type="file" accept="application/json" style="display: none;" on:change=on_import_account_file_selected />
-                    </label>
-                    {move || account_import_done.get().then(|| view! { <span style="color: #4CAF50; font-family: monospace; font-size: 0.8rem;">"✓ IMPORTED"</span> })}
-                    {move || account_export_import_error.get().map(|e| view! { <span style="color: #ff4444; font-family: monospace; font-size: 0.8rem;">{e}</span> })}
-                </div>
-                <span style="color: var(--color-text-muted); font-family: monospace; font-size: 0.75rem; opacity: 0.7; display: block; margin-bottom: 1.5rem;">
-                    "Exports characters, chats, groups, lorebooks, presets, regex scripts, and themes. Doesn't include your API keys or account settings. Import always adds new content, never overwrites."
-                </span>
-                <button
-                    type="button"
-                    on:click=move |_| set_delete_confirm_open.set(true)
-                    style="background: transparent; border: 1px solid var(--color-error); color: var(--color-error); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;"
-                >
-                    "Delete Everything"
-                </button>
-            </div>
-
             {move || delete_confirm_open.get().then(|| view! {
                 <div class="modal-backdrop" on:click=move |_| { set_delete_confirm_open.set(false); set_delete_confirm_text.set(String::new()); }>
                     <div class="modal-box" style="max-width: 480px;" on:click=|ev| ev.stop_propagation()>
@@ -983,6 +958,31 @@ pub fn SettingsPage() -> impl IntoView {
                 
                 {move || error.get().map(|e| view! { <p style="color: #ff4444; font-family: monospace; border-left: 2px solid #ff4444; padding-left: 1rem; margin-top: 1rem;">{e}</p> })}
             </form>
+
+            <div style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--color-error);">
+                <h3 style="color: var(--color-error); font-family: monospace; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 1rem;">"Danger Zone"</h3>
+                <div style="display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <button type="button" on:click=on_export_account style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
+                        "Export My Data"
+                    </button>
+                    <label style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
+                        "Import Data"
+                        <input type="file" accept="application/json" style="display: none;" on:change=on_import_account_file_selected />
+                    </label>
+                    {move || account_import_done.get().then(|| view! { <span style="color: #4CAF50; font-family: monospace; font-size: 0.8rem;">"✓ IMPORTED"</span> })}
+                    {move || account_export_import_error.get().map(|e| view! { <span style="color: #ff4444; font-family: monospace; font-size: 0.8rem;">{e}</span> })}
+                </div>
+                <span style="color: var(--color-text-muted); font-family: monospace; font-size: 0.75rem; opacity: 0.7; display: block; margin-bottom: 1.5rem;">
+                    "Exports characters, chats, groups, lorebooks, presets, regex scripts, and themes. Doesn't include your API keys or account settings. Import always adds new content, never overwrites."
+                </span>
+                <button
+                    type="button"
+                    on:click=move |_| set_delete_confirm_open.set(true)
+                    style="background: transparent; border: 1px solid var(--color-error); color: var(--color-error); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;"
+                >
+                    "Delete Everything"
+                </button>
+            </div>
         </div>
     }
 }
