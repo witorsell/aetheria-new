@@ -84,21 +84,16 @@ pub async fn connect(path: &str) -> Db {
             .execute(&read_pool)
             .await
             .expect("recording the squashed baseline migration should not fail");
-            // the reconciliation above only backfills the baseline row; any
-            // migration added after the squash point (like the themes table)
-            // still needs to actually run against this pre-existing database.
-            migrator
-                .run(&read_pool)
-                .await
-                .expect("migrations newer than the squashed baseline should apply");
-        } else {
-            // no schema yet, run migrations to create it
-            migrator
-                .run(&read_pool)
-                .await
-                .expect("migrations should apply");
         }
     }
+
+    // always run this, not just when the baseline was just reconciled above -
+    // sqlx tracks what's already applied and skips it, so this is what
+    // actually picks up any migration file added after the last deploy
+    migrator
+        .run(&read_pool)
+        .await
+        .expect("migrations should apply");
 
     let (tx, rx) = mpsc::channel(64);
     tokio::spawn(writer::run(writer_conn, rx));
