@@ -8,17 +8,18 @@ pub struct User {
     pub persona: Option<String>,
     pub use_persona: bool,
     pub avatar_url: Option<String>,
+    pub active_persona_id: Option<String>,
 }
 
 pub async fn find_by_username(pool: &sqlx::SqlitePool, username: &str) -> sqlx::Result<Option<User>> {
-    sqlx::query_as::<_, User>("SELECT id, username, password_hash, session_secret, display_name, persona, use_persona, avatar_url FROM users WHERE username = ?")
+    sqlx::query_as::<_, User>("SELECT id, username, password_hash, session_secret, display_name, persona, use_persona, avatar_url, active_persona_id FROM users WHERE username = ?")
         .bind(username)
         .fetch_optional(pool)
         .await
 }
 
 pub async fn find_by_id(pool: &sqlx::SqlitePool, id: i64) -> sqlx::Result<Option<User>> {
-    sqlx::query_as::<_, User>("SELECT id, username, password_hash, session_secret, display_name, persona, use_persona, avatar_url FROM users WHERE id = ?")
+    sqlx::query_as::<_, User>("SELECT id, username, password_hash, session_secret, display_name, persona, use_persona, avatar_url, active_persona_id FROM users WHERE id = ?")
         .bind(id)
         .fetch_optional(pool)
         .await
