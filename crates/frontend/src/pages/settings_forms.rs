@@ -16,10 +16,6 @@ pub(super) fn speed_to_preset_index(speed: u32) -> usize {
 pub(super) fn UserProfileForm(
     display_name: Signal<String>,
     set_display_name: WriteSignal<String>,
-    persona: Signal<String>,
-    set_persona: WriteSignal<String>,
-    use_persona: Signal<bool>,
-    set_use_persona: WriteSignal<bool>,
     avatar_url: Signal<Option<String>>,
     set_avatar_url: WriteSignal<Option<String>>,
     user_error: Signal<Option<String>>,
@@ -33,14 +29,10 @@ pub(super) fn UserProfileForm(
         set_user_saved.set(false);
         let name = display_name.get_untracked();
         let name_arg = if name.trim().is_empty() { None } else { Some(name) };
-        let pers = persona.get_untracked();
-        let pers_arg = if pers.trim().is_empty() { None } else { Some(pers) };
 
         spawn_local(async move {
             let req = crate::api::UpdateMeRequest {
                 display_name: name_arg,
-                persona: pers_arg,
-                use_persona: use_persona.get_untracked(),
             };
             match crate::api::update_me(req).await {
                 Ok(()) => {
@@ -124,26 +116,6 @@ pub(super) fn UserProfileForm(
                 </div>
             </div>
 
-            <div class="field" style="margin: 0;">
-                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Persona"</label>
-                <textarea
-                    placeholder="Describe your persona..."
-                    prop:value=persona
-                    on:input=move |ev| set_persona.set(event_target_value(&ev))
-                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--color-border); color: #fff; font-family: var(--font-body); padding: 1rem; font-size: 0.95rem; outline: none; width: 100%; min-height: 120px; resize: vertical; line-height: 1.5;"
-                ></textarea>
-
-                <label class="checkbox-field" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; cursor: pointer;">
-                    <input
-                        type="checkbox"
-                        prop:checked=use_persona
-                        on:change=move |ev| set_use_persona.set(event_target_checked(&ev))
-                        style="accent-color: #fff;"
-                    />
-                    "ENABLE PERSONA INJECTION"
-                </label>
-            </div>
-
             <div style="display: flex; align-items: center; justify-content: flex-end; gap: 1.5rem; border-top: 1px solid var(--color-border); padding-top: 2rem;">
                 {move || {
                     user_error.get().map(|err| {
@@ -165,5 +137,110 @@ pub(super) fn UserProfileForm(
                 </button>
             </div>
         </form>
+    }
+}
+
+#[component]
+pub(super) fn PersonaManager() -> impl IntoView {
+    let personas = LocalResource::new(|| async move { crate::api::list_personas().await });
+    let me = LocalResource::new(|| async move { crate::api::fetch_me().await });
+
+    let (new_name, set_new_name) = signal(String::new());
+    let (new_description, set_new_description) = signal(String::new());
+    let (error, set_error) = signal(String::new());
+
+    let create = move |_| {
+        let name = new_name.get_untracked();
+        if name.trim().is_empty() {
+            set_error.set("Name cannot be empty".to_string());
+            return;
+        }
+        let description = new_description.get_untracked();
+        spawn_local(async move {
+            let input = crate::api::PersonaInput {
+                name: &name,
+                description: if description.trim().is_empty() { None } else { Some(&description) },
+            };
+            match crate::api::create_persona(input).await {
+                Ok(_) => {
+                    set_new_name.set(String::new());
+                    set_new_description.set(String::new());
+                    set_error.set(String::new());
+                    personas.refetch();
+                }
+                Err(e) => set_error.set(e),
+            }
+        });
+    };
+
+    view! {
+        <div>
+            <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Personas"</label>
+
+            <Suspense fallback=move || view! { <div>"Loading personas..."</div> }>
+                {move || {
+                    let list = personas.get().and_then(|r| r.ok()).unwrap_or_default();
+                    let active_id = me.get().and_then(|r| r.ok()).and_then(|m| m.active_persona_id);
+                    view! {
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            {list.into_iter().map(|p| {
+                                let is_active = active_id.as_deref() == Some(p.id.as_str());
+                                let id_for_activate = p.id.clone();
+                                let id_for_delete = p.id.clone();
+                                view! {
+                                    <div style="display: flex; align-items: center; gap: 1rem; padding: 0.75rem; border: 1px solid var(--color-border); background: rgba(0,0,0,0.15);">
+                                        {p.avatar_url.clone().map(|url| view! {
+                                            <img src=url style="width: 40px; height: 40px; object-fit: cover; border-radius: 4px;" />
+                                        })}
+                                        <div style="flex: 1;">
+                                            <div style="font-weight: 600;">{p.name.clone()}</div>
+                                            <div style="font-size: 0.85rem; color: var(--color-text-muted); max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{p.description.clone()}</div>
+                                        </div>
+                                        {if is_active {
+                                            view! { <span style="font-size: 0.8rem; color: #4ade80;">"active"</span> }.into_any()
+                                        } else {
+                                            view! {
+                                                <button on:click=move |_| {
+                                                    let id = id_for_activate.clone();
+                                                    spawn_local(async move {
+                                                        let _ = crate::api::set_active_persona(Some(id)).await;
+                                                        me.refetch();
+                                                    });
+                                                }>"Activate"</button>
+                                            }.into_any()
+                                        }}
+                                        <button on:click=move |_| {
+                                            let id = id_for_delete.clone();
+                                            spawn_local(async move {
+                                                let _ = crate::api::delete_persona(&id).await;
+                                                personas.refetch();
+                                                me.refetch();
+                                            });
+                                        }>"Delete"</button>
+                                    </div>
+                                }
+                            }).collect_view()}
+                        </div>
+                    }
+                }}
+            </Suspense>
+
+            <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                <input
+                    placeholder="Persona name"
+                    prop:value=new_name
+                    on:input=move |ev| set_new_name.set(event_target_value(&ev))
+                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--color-border); color: #fff; padding: 0.5rem;"
+                />
+                <textarea
+                    placeholder="Describe this persona..."
+                    prop:value=new_description
+                    on:input=move |ev| set_new_description.set(event_target_value(&ev))
+                    style="background: rgba(0,0,0,0.2); border: 1px solid var(--color-border); color: #fff; padding: 0.5rem; min-height: 80px;"
+                ></textarea>
+                {move || (!error.get().is_empty()).then(|| view! { <div style="color: #f87171;">{error.get()}</div> })}
+                <button on:click=create>"+ New persona"</button>
+            </div>
+        </div>
     }
 }

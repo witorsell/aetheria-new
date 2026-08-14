@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::collections::HashMap;
 
-use super::settings_forms::{UserProfileForm, SPEED_PRESETS, speed_to_preset_index};
+use super::settings_forms::{UserProfileForm, PersonaManager, SPEED_PRESETS, speed_to_preset_index};
 
 #[component]
 pub fn SettingsPage() -> impl IntoView {
@@ -56,8 +56,6 @@ pub fn SettingsPage() -> impl IntoView {
 
     let (username, set_username) = signal(String::new());
     let (display_name, set_display_name) = signal(String::new());
-    let (persona, set_persona) = signal(String::new());
-    let (use_persona, set_use_persona) = signal(false);
     let (avatar_url, set_avatar_url) = signal(Option::<String>::None);
     let (user_error, set_user_error) = signal(Option::<String>::None);
     let (user_saved, set_user_saved) = signal(false);
@@ -97,8 +95,6 @@ pub fn SettingsPage() -> impl IntoView {
         if let Some(Ok(me)) = me_resource.get() {
             set_username.set(me.username);
             set_display_name.set(me.display_name.unwrap_or_default());
-            set_persona.set(me.persona.unwrap_or_default());
-            set_use_persona.set(me.use_persona);
             set_avatar_url.set(me.avatar_url);
         }
     });
@@ -336,10 +332,6 @@ pub fn SettingsPage() -> impl IntoView {
             <UserProfileForm
                 display_name=display_name.into()
                 set_display_name
-                persona=persona.into()
-                set_persona
-                use_persona=use_persona.into()
-                set_use_persona
                 avatar_url=avatar_url.into()
                 set_avatar_url
                 user_error=user_error.into()
@@ -348,6 +340,8 @@ pub fn SettingsPage() -> impl IntoView {
                 set_user_saved
                 forbid_external_media=forbid_external_media.into()
             />
+
+            <PersonaManager />
 
             <div style="margin-bottom: 3rem;">
                 <h1 style="font-family: var(--font-heading); font-size: 3rem; font-weight: 300; margin: 0; color: #fff; letter-spacing: -0.02em;">"System Manifest"</h1>
