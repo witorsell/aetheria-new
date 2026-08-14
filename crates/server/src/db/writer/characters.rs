@@ -219,8 +219,11 @@ impl Writer {
             let id = uuid::Uuid::new_v4().to_string();
             let now = chrono_now_millis();
             let color = input.color.as_deref().unwrap_or("#888888");
+            // tags carries a UNIQUE(user_id, name) constraint - INSERT OR IGNORE plus
+            // a follow-up lookup reuses this user's existing tag of that name instead
+            // of erroring, the same collision handling account.rs's import already uses.
             sqlx::query(
-                "INSERT INTO tags (user_id, id, name, color, created_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO tags (user_id, id, name, color, created_at) VALUES (?, ?, ?, ?, ?)",
             )
             .bind(user_id)
             .bind(&id)
@@ -228,14 +231,14 @@ impl Writer {
             .bind(color)
             .bind(now)
             .execute(&mut *conn)
+            .await?;
+            sqlx::query_as::<_, crate::models::character::Tag>(
+                "SELECT * FROM tags WHERE user_id = ? AND name = ?",
+            )
+            .bind(user_id)
+            .bind(&input.name)
+            .fetch_one(&mut *conn)
             .await
-            .map(|_| crate::models::character::Tag {
-                user_id,
-                id,
-                name: input.name,
-                color: color.to_string(),
-                created_at: now,
-            })
         })).await
     }
 

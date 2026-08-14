@@ -413,22 +413,12 @@ async fn import_is_additive_not_destructive() {
 
 #[tokio::test]
 async fn import_survives_a_tag_name_that_already_exists_on_another_account() {
-    // tags.name carries a bare, instance-wide UNIQUE constraint (not scoped
-    // by user_id - see migrations/0001_init.sql). account A creates a tag
-    // named "Fantasy" and exports a character carrying it; account B, which
-    // has never touched tags itself, then imports that export. the "Fantasy"
-    // row already exists in the table (owned by A) by the time B's import
-    // runs, so a plain INSERT would hit the UNIQUE constraint and roll back
-    // the whole transaction - character, chat, everything - even though B's
-    // own account had nothing conflicting. the fix must let this succeed.
-    //
-    // (note: the reused tag ends up "owned" by whichever account originally
-    // created that name - here, A - since the schema has no per-user
-    // scoping to fall back to. that's a pre-existing consequence of the
-    // bare UNIQUE constraint, not something in scope to fix here, so this
-    // test doesn't assert anything about tag visibility from B's own
-    // perspective - only that the import itself is no longer all-or-nothing
-    // on a tag-name collision.)
+    // tags.name is scoped UNIQUE(user_id, name) (migrations/0030), so two
+    // accounts each having a tag named "Fantasy" is fine - each gets their
+    // own row. account A creates "Fantasy" and exports a character carrying
+    // it; account B, which has never touched tags itself, imports that
+    // export and should end up with its own separate "Fantasy" tag, visible
+    // from B's own account, not A's.
     let (app, cookie_a, cookie_b) = common::authed_app_with_second_user().await;
 
     let tag = app.clone().oneshot(
@@ -490,6 +480,22 @@ async fn import_survives_a_tag_name_that_already_exists_on_another_account() {
     // the character (or anything else) that came with it
     assert_eq!(b.characters.len(), 1);
     assert_eq!(b.characters[0].name, "Aeth");
+
+    // B's own copy of the tag is visible from B's own account, not just
+    // present in some other account's row
+    assert_eq!(b.characters[0].tags, vec!["Fantasy".to_string()]);
+
+    let b_tags = app.clone().oneshot(
+        Request::builder().method("GET").uri("/api/tags")
+            .header(header::COOKIE, cookie_b.clone())
+            .body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    let b_tags_json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(b_tags.into_body(), usize::MAX).await.unwrap()
+    ).unwrap();
+    let b_tag_names: Vec<&str> = b_tags_json.as_array().unwrap()
+        .iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(b_tag_names, vec!["Fantasy"]);
 }
 
 #[tokio::test]

@@ -79,14 +79,11 @@ impl Writer {
                 }
             }
 
-            // tags: dedup by name within this import, create fresh. `tags.name`
-            // carries a bare instance-wide UNIQUE constraint (not scoped by
-            // user_id - see migrations/0001_init.sql), so a name already used
-            // by *any* account on the instance would otherwise hard-fail this
-            // whole transaction. INSERT OR IGNORE plus a follow-up lookup means
-            // a collision reuses whichever row already holds that name instead
-            // of erroring - the import always succeeds, though an imported tag
-            // can end up shared with whoever originally owns that name.
+            // tags: dedup by name within this import, create fresh. `tags.name` is
+            // scoped UNIQUE(user_id, name) (see migrations/0030), so INSERT OR IGNORE
+            // plus a lookup scoped to this same user_id reuses this account's own
+            // existing tag of that name rather than erroring or picking up someone
+            // else's row of the same name.
             let mut tag_ids_by_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
             for c in &export.characters {
                 for tag_name in &c.tags {
@@ -95,7 +92,8 @@ impl Writer {
                         sqlx::query("INSERT OR IGNORE INTO tags (user_id, id, name, color, created_at) VALUES (?, ?, ?, '', ?)")
                             .bind(user_id).bind(&id).bind(tag_name).bind(now)
                             .execute(&mut *tx).await?;
-                        let actual_id: String = sqlx::query_scalar("SELECT id FROM tags WHERE name = ?")
+                        let actual_id: String = sqlx::query_scalar("SELECT id FROM tags WHERE user_id = ? AND name = ?")
+                            .bind(user_id)
                             .bind(tag_name)
                             .fetch_one(&mut *tx)
                             .await?;
