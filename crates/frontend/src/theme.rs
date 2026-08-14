@@ -8,7 +8,7 @@ pub struct ThemeStore(pub RwSignal<ThemeTokens>);
 /// handful of tokens that are shape/mode switches rather than raw CSS
 /// values as body classes, mirroring how SillyTavern's `applyTheme()`
 /// handles `avatar_style`/`chat_display` via body classes instead of custom
-/// properties (see `SillyTavern`'s `power-user.js`).
+/// properties (see SillyTavern's `power-user.js`).
 pub fn apply_tokens_to_root(tokens: &ThemeTokens) {
     use wasm_bindgen::JsCast;
 
