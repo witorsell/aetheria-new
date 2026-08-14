@@ -89,6 +89,41 @@ fn assembles_system_prompt_from_character_fields_and_global_suffix() {
 }
 
 #[test]
+fn active_persona_name_and_description_flow_into_system_prompt() {
+    let messages = assemble(
+        &test_character(),
+        &[],
+        "Hi!",
+        "Speak directly to {{user}}.",
+        "",
+        0,
+        "Detective OC",
+        Some("A 190cm cyborg detective."),
+    );
+
+    assert!(messages[0].content.contains("Speak directly to Detective OC."));
+    assert!(messages[0].content.contains("\"Detective OC\"'s Persona:"));
+    assert!(messages[0].content.contains("A 190cm cyborg detective."));
+}
+
+#[test]
+fn no_active_persona_falls_back_to_plain_user_name_in_macros() {
+    let messages = assemble(
+        &test_character(),
+        &[],
+        "Hi!",
+        "Speak directly to {{user}}.",
+        "",
+        0,
+        "Testuser",
+        None,
+    );
+
+    assert!(messages[0].content.contains("Speak directly to Testuser."));
+    assert!(!messages[0].content.contains("'s Persona:"));
+}
+
+#[test]
 fn includes_first_message_as_opening_assistant_turn_when_history_is_empty() {
     let messages = assemble(&test_character(), &[], "Hi!", "", "", 0, "User", None);
 
