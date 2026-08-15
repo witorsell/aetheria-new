@@ -4,6 +4,18 @@ use leptos::prelude::*;
 #[derive(Clone, Copy)]
 pub struct ThemeStore(pub RwSignal<ThemeTokens>);
 
+fn hex_to_rgb_triplet(hex: &str) -> String {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 {
+        return "0, 0, 0".to_string();
+    }
+    let parse = |s: &str| u8::from_str_radix(s, 16).unwrap_or(0);
+    match (h.get(0..2), h.get(2..4), h.get(4..6)) {
+        (Some(r), Some(g), Some(b)) => format!("{}, {}, {}", parse(r), parse(g), parse(b)),
+        _ => "0, 0, 0".to_string(),
+    }
+}
+
 /// writes every token onto `:root` as a CSS custom property, and toggles the
 /// handful of tokens that are shape/mode switches rather than raw CSS
 /// values as body classes, mirroring how SillyTavern's `applyTheme()`
@@ -40,6 +52,12 @@ pub fn apply_tokens_to_root(tokens: &ThemeTokens) {
     let _ = style.set_property("--shadow-strength", &tokens.shadow_strength.to_string());
     let _ = style.set_property("--chat-width", &format!("{}vw", tokens.chat_width));
     let _ = style.set_property("--mascot-accent", &tokens.mascot_accent);
+    let _ = style.set_property("--color-chat-bg", &tokens.color_chat_bg);
+    let _ = style.set_property("--color-user-message-bg", &tokens.color_user_message_bg);
+    let _ = style.set_property("--color-assistant-message-bg", &tokens.color_assistant_message_bg);
+    let _ = style.set_property("--color-text-italic", &tokens.color_text_italic);
+    let _ = style.set_property("--color-text-underline", &tokens.color_text_underline);
+    let _ = style.set_property("--shadow-color-rgb", &hex_to_rgb_triplet(&tokens.color_shadow));
 
     let Some(body) = document.body() else { return };
     for class in ["avatar-circle", "avatar-rounded", "avatar-square"] {
@@ -66,5 +84,27 @@ pub fn apply_tokens_to_root(tokens: &ThemeTokens) {
                 let _ = head.append_child(&style_el);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_to_rgb_triplet_parses_a_normal_hex_color() {
+        assert_eq!(hex_to_rgb_triplet("#7c5cff"), "124, 92, 255");
+    }
+
+    #[test]
+    fn hex_to_rgb_triplet_works_without_the_leading_hash() {
+        assert_eq!(hex_to_rgb_triplet("000000"), "0, 0, 0");
+    }
+
+    #[test]
+    fn hex_to_rgb_triplet_falls_back_to_black_on_invalid_input() {
+        assert_eq!(hex_to_rgb_triplet("rgba(0,0,0,1)"), "0, 0, 0");
+        assert_eq!(hex_to_rgb_triplet("#fff"), "0, 0, 0");
+        assert_eq!(hex_to_rgb_triplet(""), "0, 0, 0");
     }
 }
