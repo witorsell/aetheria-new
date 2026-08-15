@@ -35,6 +35,9 @@ Switched to SillyTavern after seeing all the positive opinions on it, but it was
 So here we are.
 
 ## Recent updates
+Last 7 days only. Older entries get trimmed off.
+- Character editor can re-import a card file onto an existing character to sync fields, tags, and greetings in place, instead of deleting and re-importing from scratch (Aug 15)
+- Tag import now batches into one request instead of one round-trip per tag, tags render as compact chips in the editor instead of full rows, and deleting a character cleans up any tag nothing else references (Aug 15)
 - Fixed generation state (streaming reply, typing indicator, send-blocked) leaking between chats when you navigate away mid-stream; continue and respond-as-me generation now run in a detached task like send/regenerate already did, so they survive navigating away instead of dying with the request (Aug 15)
 - Fixed streamed replies corrupting multi-byte characters (accents, CJK, emoji) split across a network chunk boundary; wrapped settings and lorebook writes in real transactions instead of sequential statements that could partially fail (Aug 15)
 - Character tags: picker, list filtering, profile badges, a bulk-tag endpoint, case-insensitive per-user-unique names, real deletion (not just untick), carried through card import/export (Aug 15)
