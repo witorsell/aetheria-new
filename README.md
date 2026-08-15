@@ -36,6 +36,9 @@ So here we are.
 
 ## Recent updates
 Last 7 days only. Older entries get trimmed off.
+- Image/video proxy reuses one pooled HTTP client instead of rebuilding one per request, checks the cache before any network call, and now only serves back actual image/video content instead of whatever a target URL happens to return (Aug 15)
+- Character export was silently dropping creator notes and any linked lorebook, and printing everything as one minified, alphabetically-sorted line; both now round-trip through export and the file comes out pretty-printed with name first (Aug 15)
+- Library search box replaces the tag-filter button row, matching characters by name and tag together instead of filtering by one tag at a time (Aug 15)
 - Character editor can re-import a card file onto an existing character to sync fields, tags, and greetings in place, instead of deleting and re-importing from scratch (Aug 15)
 - Tag import now batches into one request instead of one round-trip per tag, tags render as compact chips in the editor instead of full rows, and deleting a character cleans up any tag nothing else references (Aug 15)
 - Fixed generation state (streaming reply, typing indicator, send-blocked) leaking between chats when you navigate away mid-stream; continue and respond-as-me generation now run in a detached task like send/regenerate already did, so they survive navigating away instead of dying with the request (Aug 15)

@@ -68,6 +68,12 @@ pub struct AppState {
     /// reused across requests so connection-pool / DNS-cache / TLS handshake
     /// costs are paid once, not per-generation.
     pub http_client: reqwest::Client,
+    /// shared, pooled HTTP client for proxying arbitrary user-supplied image/
+    /// avatar URLs. kept separate from `http_client` since it carries SSRF
+    /// protections (see `routes::proxy::SafeResolver`) and proxy-specific
+    /// settings (spoofed user agent, no redirects) that provider calls to
+    /// known/trusted endpoints don't need.
+    pub proxy_client: reqwest::Client,
     /// failed login attempts per username. keyed lowercase so the
     /// lockout can't be dodged by varying case. TTL doubles as the lockout
     /// window: every failed attempt refreshes it, so a username under active
@@ -140,6 +146,7 @@ impl AppState {
                 .time_to_live(Duration::from_secs(img_cache_ttl))
                 .build(),
             http_client,
+            proxy_client: crate::routes::proxy::build_proxy_client(),
             login_attempts: Cache::builder()
                 .max_capacity(10_000)
                 .time_to_live(Duration::from_secs(15 * 60))

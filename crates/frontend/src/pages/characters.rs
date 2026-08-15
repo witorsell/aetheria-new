@@ -8,11 +8,7 @@ pub fn CharactersPage() -> impl IntoView {
     let characters_version = RwSignal::new(0);
     provide_context(CharactersVersion(characters_version));
 
-    let (selected_tag, set_selected_tag) = signal(Option::<String>::None);
-    let all_tags = LocalResource::new(move || {
-        characters_version.get();
-        async move { api::list_tags().await.unwrap_or_default() }
-    });
+    let (search, set_search) = signal(String::new());
 
     let (name, set_name) = signal(String::new());
     let (description, set_description) = signal(String::new());
@@ -94,31 +90,16 @@ pub fn CharactersPage() -> impl IntoView {
                         <button type="submit" class="btn" style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text-muted);">"Logout"</button>
                     </form>
                 </div>
-                <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
-                    <button
-                        class="ghost small"
-                        style=move || if selected_tag.get().is_none() { "border-color: var(--color-accent);".to_string() } else { String::new() }
-                        on:click=move |_| set_selected_tag.set(None)
-                    >"All"</button>
-                    {move || all_tags.get().unwrap_or_default().into_iter().map(|t| {
-                        let id = t.id.clone();
-                        let id2 = t.id.clone();
-                        view! {
-                            <button
-                                class="ghost small"
-                                style=move || {
-                                    let base = format!("border-color: {}; display: inline-flex; align-items: center; gap: 0.35rem;", t.color);
-                                    if selected_tag.get().as_deref() == Some(id.as_str()) { format!("{base} background: color-mix(in srgb, {} 25%, transparent); font-weight: 600;", t.color) } else { base }
-                                }
-                                on:click=move |_| set_selected_tag.set(Some(id2.clone()))
-                            >
-                                <span style=format!("width: 0.5rem; height: 0.5rem; border-radius: 50%; background: {};", t.color)></span>
-                                {t.name.clone()}
-                            </button>
-                        }
-                    }).collect::<Vec<_>>()}
+                <div style="margin-bottom: 1rem;">
+                    <input
+                        type="text"
+                        placeholder="Search by name or tag…"
+                        style="width: 100%;"
+                        prop:value=search
+                        on:input=move |ev| set_search.set(event_target_value(&ev))
+                    />
                 </div>
-                <CharacterList filter_tag=Signal::derive(move || selected_tag.get()) />
+                <CharacterList filter_query=Signal::derive(move || search.get()) />
             </div>
             
             <div class="library-draft">

@@ -14,12 +14,13 @@ pub struct CharactersVersion(pub RwSignal<u32>);
 /// the character list with click-to-open-or-create-chat behavior. used by
 /// both the sidebar (compact, always visible) and the Characters page
 /// (fuller list alongside the create form).
-/// when set, enables tag badges on each character and filters the list down
-/// to whichever tag_id the signal currently holds (`None` = show everything).
-/// left unset by callers (the sidebar's compact list) to skip the extra
-/// tag-data fetch entirely and keep that view unchanged.
+/// when set, enables tag badges on each character and filters the list down to
+/// whatever's typed in the signal, matched against character names and tag
+/// names (case-insensitive substring, empty = show everything). left unset by
+/// callers (the sidebar's compact list) to skip the extra tag-data fetch
+/// entirely and keep that view unchanged.
 #[component]
-pub fn CharacterList(#[prop(optional)] filter_tag: Option<Signal<Option<String>>>) -> impl IntoView {
+pub fn CharacterList(#[prop(optional)] filter_query: Option<Signal<String>>) -> impl IntoView {
     let version = use_context::<CharactersVersion>()
         .map(|v| v.0)
         .unwrap_or_else(|| RwSignal::new(0));
@@ -39,7 +40,7 @@ pub fn CharacterList(#[prop(optional)] filter_tag: Option<Signal<Option<String>>
         }
     });
 
-    let show_tags = filter_tag.is_some();
+    let show_tags = filter_query.is_some();
     let character_tags = LocalResource::new(move || {
         version.get();
         async move {
@@ -83,20 +84,27 @@ pub fn CharacterList(#[prop(optional)] filter_tag: Option<Signal<Option<String>>
                         let tags_by_character = character_tags.get().unwrap_or_default();
                         let tags_by_id: HashMap<String, api::Tag> = all_tags.get().unwrap_or_default()
                             .into_iter().map(|t| (t.id.clone(), t)).collect();
-                        let selected = filter_tag.and_then(|f| f.get());
+                        let query = filter_query.map(|f| f.get()).unwrap_or_default();
+                        // each whitespace-separated term must match somewhere - name or a tag name -
+                        // so multiple terms narrow the results down instead of widening them.
+                        let terms: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
 
                         let filtered: Vec<Character> = list.into_iter().filter(|c| {
-                            match &selected {
-                                None => true,
-                                Some(tag_id) => tags_by_character.get(&c.id)
-                                    .map(|ids| ids.contains(tag_id))
-                                    .unwrap_or(false),
+                            if terms.is_empty() {
+                                return true;
                             }
+                            let name_lower = c.name.to_lowercase();
+                            let tag_names: Vec<String> = tags_by_character.get(&c.id)
+                                .map(|ids| ids.iter().filter_map(|id| tags_by_id.get(id)).map(|t| t.name.to_lowercase()).collect())
+                                .unwrap_or_default();
+                            terms.iter().all(|term| {
+                                name_lower.contains(term.as_str()) || tag_names.iter().any(|t| t.contains(term.as_str()))
+                            })
                         }).collect();
 
                         if filtered.is_empty() {
                             view! {
-                                <p style="color: var(--color-text-muted); font-size: 0.875rem; padding: 1rem;">"No characters have this tag."</p>
+                                <p style="color: var(--color-text-muted); font-size: 0.875rem; padding: 1rem;">"No characters match that search."</p>
                             }.into_any()
                         } else {
                             filtered.into_iter()

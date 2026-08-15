@@ -311,26 +311,91 @@ pub async fn export_character(
             .collect()
     };
 
-    let v2_json = json!({
-        "spec": "chara_card_v2",
-        "spec_version": "2.0",
-        "data": {
-            "name": character.name,
-            "description": character.description,
-            "personality": character.personality,
-            "scenario": character.scenario,
-            "first_mes": character.first_message,
-            "mes_example": character.sample_chat,
-            "creator_notes": "",
-            "system_prompt": character.system_prompt,
-            "post_history_instructions": character.post_history_instructions,
-            "tags": tag_names,
-            "creator": "",
-            "character_version": "",
-            "alternate_greetings": greetings,
-            "extensions": extensions
+    // import folds a card's `creator_notes` into `character.description` (see the
+    // cross-mapping note by compute_card_fields in the frontend's characters.rs) -
+    // so exporting has to put it back under `creator_notes` and leave `description`
+    // blank, not echo `character.description` into `description` too. leaving both
+    // populated round-trips through another import as a real duplication bug: on
+    // reimport, `personality` would end up as `description` + "\n\n" + `personality`,
+    // growing every export/reimport cycle.
+    let lorebook_ids = crate::models::lorebook::list_character_lorebooks(&state.db.read_pool, user_id, &id)
+        .await
+        .unwrap_or_default();
+    let character_book = if let Some(lorebook_id) = lorebook_ids.first() {
+        match crate::models::lorebook::get(&state.db.read_pool, user_id, lorebook_id).await {
+            Ok(Some(lorebook)) => {
+                let entries = crate::models::lorebook::list_entries(&state.db.read_pool, user_id, lorebook_id)
+                    .await
+                    .unwrap_or_default();
+                let entries_json: Vec<Value> = entries
+                    .into_iter()
+                    .map(|e| {
+                        let keys: Value = serde_json::from_str(&e.keywords).unwrap_or(json!([]));
+                        let secondary_keys: Value = serde_json::from_str(&e.secondary_keys).unwrap_or(json!([]));
+                        json!({
+                            "keys": keys,
+                            "secondary_keys": secondary_keys,
+                            "name": e.name,
+                            "comment": e.comment,
+                            "content": e.entry,
+                            "constant": e.constant,
+                            "selective": e.selective,
+                            "insertion_order": e.priority,
+                            "enabled": e.enabled,
+                            "position": e.position,
+                            "extensions": {
+                                "weight": e.weight,
+                                "probability": e.probability,
+                                "useProbability": e.use_probability,
+                                "selectiveLogic": e.selective_logic,
+                                "excludeRecursion": e.exclude_recursion,
+                            }
+                        })
+                    })
+                    .collect();
+                Some(json!({
+                    "name": lorebook.name,
+                    "description": lorebook.description,
+                    "scan_depth": lorebook.scan_depth,
+                    "token_budget": lorebook.token_budget,
+                    "recursive_scanning": lorebook.recursive_scanning,
+                    "extensions": serde_json::from_str::<Value>(&lorebook.extensions).unwrap_or(json!({})),
+                    "entries": entries_json,
+                }))
+            }
+            _ => None,
         }
-    });
+    } else {
+        None
+    };
+
+    // built as an explicit ordered map (not the `json!` object literal) so field
+    // order in the file matches this list - name first, metadata last - instead
+    // of whatever order the JSON library's map type happens to iterate in.
+    let mut data = serde_json::Map::new();
+    data.insert("name".to_string(), json!(character.name));
+    data.insert("description".to_string(), json!(""));
+    data.insert("personality".to_string(), json!(character.personality));
+    data.insert("scenario".to_string(), json!(character.scenario));
+    data.insert("first_mes".to_string(), json!(character.first_message));
+    data.insert("mes_example".to_string(), json!(character.sample_chat));
+    data.insert("creator_notes".to_string(), json!(character.description));
+    data.insert("system_prompt".to_string(), json!(character.system_prompt));
+    data.insert("post_history_instructions".to_string(), json!(character.post_history_instructions));
+    data.insert("alternate_greetings".to_string(), json!(greetings));
+    if let Some(book) = character_book {
+        data.insert("character_book".to_string(), book);
+    }
+    data.insert("tags".to_string(), json!(tag_names));
+    data.insert("creator".to_string(), json!(""));
+    data.insert("character_version".to_string(), json!(""));
+    data.insert("extensions".to_string(), extensions);
+
+    let mut v2_json = serde_json::Map::new();
+    v2_json.insert("spec".to_string(), json!("chara_card_v2"));
+    v2_json.insert("spec_version".to_string(), json!("2.0"));
+    v2_json.insert("data".to_string(), Value::Object(data));
+    let v2_json = Value::Object(v2_json);
 
     let is_png = query.format.as_deref().unwrap_or("json") == "png";
 
@@ -353,7 +418,7 @@ pub async fn export_character(
                     loaded_img = image::open(local_path).ok();
                 } else if u.starts_with("http") {
                     // reuse the same SSRF protections as the image proxy
-                    if let Ok(resp) = crate::routes::proxy::proxy_fetch_with_checks(u).await {
+                    if let Ok(resp) = crate::routes::proxy::proxy_fetch_with_checks(&state.proxy_client, u).await {
                         if let Ok(bytes) = resp.bytes().await {
                             loaded_img = image::load_from_memory(&bytes).ok();
                         }
@@ -403,7 +468,7 @@ pub async fn export_character(
             axum::http::header::CONTENT_TYPE,
             "application/json".to_string(),
         )],
-        Json(v2_json).to_string(),
+        serde_json::to_string_pretty(&v2_json).unwrap_or_default(),
     ).into_response()
 }
 /// import/export target the character-book v2 shape (the same interchange
@@ -571,6 +636,6 @@ pub async fn export_lorebook(
             axum::http::header::CONTENT_TYPE,
             "application/json".to_string(),
         )],
-        Json(book).to_string(),
+        serde_json::to_string_pretty(&book).unwrap_or_default(),
     ).into_response()
 }
