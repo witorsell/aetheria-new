@@ -40,17 +40,11 @@ So here we are.
 - Character tags: picker, list filtering, profile badges, a bulk-tag endpoint, case-insensitive per-user-unique names, real deletion (not just untick), carried through card import/export (Aug 15)
 - Mapped more SillyTavern theme fields onto tokens (chat/message backgrounds, italic/underline text, shadow color) and exposed them in the theme editor (Aug 15)
 - Sanitized markdown link hrefs the same way raw `<a>` tags already were (Aug 15)
-- Mobile fixes: editor tabs wrap instead of overflowing off-screen, persona/preset rows no longer overflow (Aug 14-15)
+- Mobile fixes: editor tabs wrap instead of overflowing off-screen, persona/preset rows no longer overflow, danger zone moved to the bottom of settings (Aug 14-15)
+- Danger zone in system settings: export, import, and delete-everything (Aug 13)
 - Persona library: multiple named personas with descriptions, switchable from settings, replacing the old single global persona field (Aug 14)
 - One-click install script, and `chat.rs`/`SettingsView` split into smaller focused modules for easier maintenance going forward (Aug 13)
 - Full theme system: SillyTavern-style token editor with instant live preview, import/export (including direct SillyTavern UI theme JSON import), plus a redesigned default look and a mascot (Aug 12)
-- Group chats with multiple activation strategies (List, Natural) and per-character talkativeness (Aug 6-7)
-- Character card import/export as SillyTavern-compatible PNG cards (Aug 5-6)
-- Character alternate greetings, tags, and folders (Aug 5-6)
-- Lorebook auto-creation from imported character cards (Aug 5)
-- In-chat member management panel for groups (Aug 7)
-- Fixed a frontend loop that was hammering the backend's config route on every character list render (Aug 5)
-- AI-assisted generation of character fields (scenario, appearance, persona, greeting, example dialogue) (Aug 7)
 
 ## Stuff that works
 
