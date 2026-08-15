@@ -337,7 +337,7 @@ pub fn ChatPage() -> impl IntoView {
     view! {
         <div class="chat-page">
 
-        <div class="chat-header" style="position: sticky; top: -2rem; z-index: 100; background: #0a0a0c; display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; margin-top: -2rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border);">
+        <div class="chat-header" style="position: sticky; top: -2rem; z-index: 100; background: var(--color-bg); display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; margin-top: -2rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border);">
                 <strong>{move || char_name_sig.get()}</strong>
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
                     // mounted once behind Show rather than rebuilt from chat_meta.get().map(...)

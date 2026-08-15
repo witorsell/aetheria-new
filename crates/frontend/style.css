@@ -239,6 +239,10 @@ button:disabled {
   padding-bottom: 8rem;
 }
 
+.chat-page {
+  background: var(--color-chat-bg);
+}
+
 .character-avatar {
   width: 32px;
   height: 32px;
@@ -446,7 +450,7 @@ button:disabled {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, calc(0.4 * var(--shadow-strength)));
+  box-shadow: 0 4px 16px rgba(var(--shadow-color-rgb), calc(0.4 * var(--shadow-strength)));
 }
 .more-menu-item {
   background: transparent;
@@ -487,7 +491,7 @@ button:disabled {
   max-height: 85vh;
   overflow-y: auto;
   margin: auto;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, calc(0.8 * var(--shadow-strength)));
+  box-shadow: 0 20px 50px rgba(var(--shadow-color-rgb), calc(0.8 * var(--shadow-strength)));
 }
 .modal-header {
   display: flex;
@@ -626,7 +630,10 @@ button:disabled {
   padding-left: 0;
 }
 .message-row.user .message-content-wrapper {
-  /* optional user styling */
+  background: var(--color-user-message-bg);
+}
+.message-row.assistant .message-content-wrapper {
+  background: var(--color-assistant-message-bg);
 }
 
 .message-header {
@@ -750,7 +757,10 @@ button:disabled {
 }
 
 .message-row em {
-  color: var(--color-accent);
+  color: var(--color-text-italic);
+}
+.message-row u {
+  color: var(--color-text-underline);
 }
 
 .streaming-cursor {
