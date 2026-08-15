@@ -36,6 +36,7 @@ So here we are.
 
 ## Recent updates
 Last 7 days only. Older entries get trimmed off.
+- A backgrounded mobile tab (or a dead cellular connection) could leave a chat reply stuck "generating" forever with no error and no way to recover but reloading; streaming requests now carry an idle watchdog that aborts and reports an error once a connection goes fully silent (Aug 15)
 - Image/video proxy reuses one pooled HTTP client instead of rebuilding one per request, checks the cache before any network call, and now only serves back actual image/video content instead of whatever a target URL happens to return (Aug 15)
 - Character export was silently dropping creator notes and any linked lorebook, and printing everything as one minified, alphabetically-sorted line; both now round-trip through export and the file comes out pretty-printed with name first (Aug 15)
 - Library search box replaces the tag-filter button row, matching characters by name and tag together instead of filtering by one tag at a time (Aug 15)

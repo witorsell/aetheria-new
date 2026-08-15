@@ -74,6 +74,29 @@ pub async fn logout() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+// a mobile browser backgrounded mid-stream can suspend the tab without the
+// underlying connection ever erroring out, and a mobile carrier's NAT can kill
+// an idle connection outright with neither side seeing a clean close - either
+// way the fetch can go silent forever with no error and no more data, leaving
+// the caller's "generating"/"loading" flag stuck forever too. this watchdog
+// aborts the request if too long passes with nothing at all coming through,
+// which routes it into the same on_error path a normal dropped connection
+// already takes below instead of hanging. the timer itself is also suspended
+// while the tab is hidden (same as any other JS timer), so it doesn't fire
+// silently in the background - it fires the moment the tab is foregrounded
+// again and real time has already blown past the deadline, which is exactly
+// when the user is looking at the stuck UI wondering why it's still spinning.
+const IDLE_TIMEOUT_MS: u32 = 90_000;
+
+fn arm_idle_timeout(abort_controller: &web_sys::AbortController) -> gloo_timers::callback::Timeout {
+    let abort_controller = abort_controller.clone();
+    gloo_timers::callback::Timeout::new(IDLE_TIMEOUT_MS, move || abort_controller.abort())
+}
+
+// `_idle_timeout` is reassigned purely to reset the watchdog (each new value's
+// Drop cancels the one it replaces) - it's never read directly, which the
+// compiler can't tell apart from a genuine dead store.
+#[allow(unused_assignments)]
 pub async fn stream_post(
     url: &str,
     body: Option<String>,
@@ -81,9 +104,13 @@ pub async fn stream_post(
     mut on_member: impl FnMut(String, String),
     mut on_error: impl FnMut(String),
 ) -> Result<(), String> {
+    let abort_controller = web_sys::AbortController::new().map_err(|e| format!("{e:?}"))?;
+    let mut _idle_timeout = arm_idle_timeout(&abort_controller);
+
     let init = web_sys::RequestInit::new();
     init.set_method("POST");
     init.set_credentials(web_sys::RequestCredentials::Include);
+    init.set_signal(Some(&abort_controller.signal()));
     if let Some(body) = &body {
         init.set_body(&JsValue::from_str(body));
     }
@@ -99,6 +126,7 @@ pub async fn stream_post(
     let response_value = JsFuture::from(window.fetch_with_request(&request))
         .await
         .map_err(|e| format!("{e:?}"))?;
+    _idle_timeout = arm_idle_timeout(&abort_controller);
     let response: web_sys::Response = response_value.dyn_into().map_err(|e| format!("{e:?}"))?;
 
     if response.status() == 401 {
@@ -180,6 +208,7 @@ pub async fn stream_post(
                 break;
             }
         };
+        _idle_timeout = arm_idle_timeout(&abort_controller);
         let done = js_sys::Reflect::get(&chunk_value, &JsValue::from_str("done"))
             .map_err(|e| format!("{e:?}"))?
             .as_bool()
