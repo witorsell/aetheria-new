@@ -159,43 +159,51 @@ impl Writer {
 
     pub async fn set_character_lorebooks(&self, user_id: i64, character_id: String, lorebook_ids: Vec<String>) -> sqlx::Result<()> {
         self.dispatch(move |conn| Box::pin(async move {
-            let _ = sqlx::query("DELETE FROM character_lorebooks WHERE character_id = ? AND user_id = ?")
+            let mut tx = conn.begin().await?;
+
+            sqlx::query("DELETE FROM character_lorebooks WHERE character_id = ? AND user_id = ?")
                 .bind(&character_id)
                 .bind(user_id)
-                .execute(&mut *conn)
-                .await;
+                .execute(&mut *tx)
+                .await?;
             for lb_id in lorebook_ids {
-                let _ = sqlx::query("INSERT INTO character_lorebooks (user_id, character_id, lorebook_id) VALUES (?, ?, ?)")
+                sqlx::query("INSERT INTO character_lorebooks (user_id, character_id, lorebook_id) VALUES (?, ?, ?)")
                     .bind(user_id)
                     .bind(&character_id)
                     .bind(&lb_id)
-                    .execute(&mut *conn)
-                    .await;
+                    .execute(&mut *tx)
+                    .await?;
             }
+
+            tx.commit().await?;
             Ok(())
         })).await
     }
 
     pub async fn set_chat_lorebooks(&self, user_id: i64, chat_id: String, lorebook_ids: Vec<String>) -> sqlx::Result<()> {
         self.dispatch(move |conn| Box::pin(async move {
+            let mut tx = conn.begin().await?;
+
             sqlx::query("UPDATE chats SET lorebooks_customized = 1 WHERE id = ? AND user_id = ?")
                 .bind(&chat_id)
                 .bind(user_id)
-                .execute(&mut *conn)
+                .execute(&mut *tx)
                 .await?;
             sqlx::query("DELETE FROM chat_lorebooks WHERE chat_id = ? AND user_id = ?")
                 .bind(&chat_id)
                 .bind(user_id)
-                .execute(&mut *conn)
+                .execute(&mut *tx)
                 .await?;
             for lb_id in lorebook_ids {
                 sqlx::query("INSERT INTO chat_lorebooks (user_id, chat_id, lorebook_id) VALUES (?, ?, ?)")
                     .bind(user_id)
                     .bind(&chat_id)
                     .bind(&lb_id)
-                    .execute(&mut *conn)
+                    .execute(&mut *tx)
                     .await?;
             }
+
+            tx.commit().await?;
             Ok(())
         })).await
     }
