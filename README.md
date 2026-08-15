@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/main.gif" alt="Aetheria" width="600"/>
+  <img src="assets/main.png" alt="Aetheria" width="600"/>
 </p>
 
 <p align="center">
