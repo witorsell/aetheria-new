@@ -35,6 +35,12 @@ Switched to SillyTavern after seeing all the positive opinions on it, but it was
 So here we are.
 
 ## Recent updates
+- Fixed generation state (streaming reply, typing indicator, send-blocked) leaking between chats when you navigate away mid-stream; continue and respond-as-me generation now run in a detached task like send/regenerate already did, so they survive navigating away instead of dying with the request (Aug 15)
+- Fixed streamed replies corrupting multi-byte characters (accents, CJK, emoji) split across a network chunk boundary; wrapped settings and lorebook writes in real transactions instead of sequential statements that could partially fail (Aug 15)
+- Character tags: picker, list filtering, profile badges, a bulk-tag endpoint, case-insensitive per-user-unique names, real deletion (not just untick), carried through card import/export (Aug 15)
+- Mapped more SillyTavern theme fields onto tokens (chat/message backgrounds, italic/underline text, shadow color) and exposed them in the theme editor (Aug 15)
+- Sanitized markdown link hrefs the same way raw `<a>` tags already were (Aug 15)
+- Mobile fixes: editor tabs wrap instead of overflowing off-screen, persona/preset rows no longer overflow (Aug 14-15)
 - Persona library: multiple named personas with descriptions, switchable from settings, replacing the old single global persona field (Aug 14)
 - One-click install script, and `chat.rs`/`SettingsView` split into smaller focused modules for easier maintenance going forward (Aug 13)
 - Full theme system: SillyTavern-style token editor with instant live preview, import/export (including direct SillyTavern UI theme JSON import), plus a redesigned default look and a mascot (Aug 12)
