@@ -12,6 +12,12 @@ fn d_color_text_muted() -> String { "#a09aad".into() }
 fn d_color_text_heading() -> String { "#ffffff".into() }
 fn d_color_error() -> String { "#f43f5e".into() }
 fn d_color_error_bg() -> String { "rgba(244, 63, 94, 0.05)".into() }
+fn d_color_chat_bg() -> String { "transparent".into() }
+fn d_color_user_message_bg() -> String { "transparent".into() }
+fn d_color_assistant_message_bg() -> String { "transparent".into() }
+fn d_color_text_italic() -> String { "#7c5cff".into() }
+fn d_color_text_underline() -> String { "#ffffff".into() }
+fn d_color_shadow() -> String { "#000000".into() }
 fn d_font_heading() -> String { "'Quicksand', system-ui, sans-serif".into() }
 fn d_font_body() -> String { "'Inter', system-ui, sans-serif".into() }
 fn d_font_scale() -> f64 { 1.0 }
@@ -58,6 +64,18 @@ pub struct ThemeTokens {
     pub color_error: String,
     #[serde(default = "d_color_error_bg")]
     pub color_error_bg: String,
+    #[serde(default = "d_color_chat_bg")]
+    pub color_chat_bg: String,
+    #[serde(default = "d_color_user_message_bg")]
+    pub color_user_message_bg: String,
+    #[serde(default = "d_color_assistant_message_bg")]
+    pub color_assistant_message_bg: String,
+    #[serde(default = "d_color_text_italic")]
+    pub color_text_italic: String,
+    #[serde(default = "d_color_text_underline")]
+    pub color_text_underline: String,
+    #[serde(default = "d_color_shadow")]
+    pub color_shadow: String,
     #[serde(default = "d_font_heading")]
     pub font_heading: String,
     #[serde(default = "d_font_body")]
@@ -119,6 +137,7 @@ pub fn light_theme_tokens() -> ThemeTokens {
         color_text_heading: "#1a1420".into(),
         color_error: "#dc2626".into(),
         color_error_bg: "rgba(220, 38, 38, 0.08)".into(),
+        color_text_underline: "#1a1420".into(),
         ..ThemeTokens::default()
     }
 }
@@ -149,8 +168,13 @@ fn st_chat_display(n: i64) -> String {
 /// translates a raw SillyTavern theme JSON export onto aetheria's token
 /// set. fields aetheria has that ST doesn't (mascot_*, radius_*, the new
 /// color_text_heading/color_surface_hover/color_accent_hover/color_error_bg)
-/// are left at the default theme's values. `custom_css` is carried across
-/// unmodified here. stripping `@import` out of it is the caller's job
+/// are left at the default theme's values. covers chat/message background
+/// tint, italic/underline text color, and shadow color too now
+/// (chat_tint_color, user_mes_blur_tint_color, bot_mes_blur_tint_color,
+/// italics_text_color, underline_text_color, shadow_color) - the rest of
+/// ST's theme fields are feature toggles (waifuMode, timer_enabled, etc.)
+/// with no Aetheria equivalent to hang them on. `custom_css` is carried
+/// across unmodified here. stripping `@import` out of it is the caller's job
 /// (`routes::themes::validate`), which runs uniformly for every path a theme
 /// can be created or updated through, not just this one.
 pub fn st_to_aetheria(raw: &serde_json::Value) -> ThemeTokens {
@@ -170,6 +194,12 @@ pub fn st_to_aetheria(raw: &serde_json::Value) -> ThemeTokens {
     if let Some(v) = i("avatar_style") { tokens.avatar_style = st_avatar_style(v); }
     if let Some(v) = i("chat_display") { tokens.chat_display = st_chat_display(v); }
     if let Some(v) = s("custom_css") { tokens.custom_css = v; }
+    if let Some(v) = s("chat_tint_color") { tokens.color_chat_bg = v; }
+    if let Some(v) = s("user_mes_blur_tint_color") { tokens.color_user_message_bg = v; }
+    if let Some(v) = s("bot_mes_blur_tint_color") { tokens.color_assistant_message_bg = v; }
+    if let Some(v) = s("italics_text_color") { tokens.color_text_italic = v; }
+    if let Some(v) = s("underline_text_color") { tokens.color_text_underline = v; }
+    if let Some(v) = s("shadow_color") { tokens.color_shadow = v; }
 
     tokens
 }
@@ -333,7 +363,12 @@ mod tests {
             "avatar_style": 2,
             "chat_display": 1,
             "chat_width": 50,
-            "custom_css": ""
+            "custom_css": "",
+            "chat_tint_color": "rgba(0,0,0,0.5)",
+            "user_mes_blur_tint_color": "rgba(20,20,20,0.9)",
+            "bot_mes_blur_tint_color": "rgba(30,30,30,0.9)",
+            "italics_text_color": "rgba(200,200,200,1)",
+            "underline_text_color": "rgba(255,255,255,1)"
         });
         let tokens = st_to_aetheria(&raw);
         assert_eq!(tokens.color_text, "rgba(235,235,235,1)");
@@ -341,9 +376,21 @@ mod tests {
         assert_eq!(tokens.blur_strength, 3.0);
         assert_eq!(tokens.avatar_style, "rounded"); // ST's avatar_style 2
         assert_eq!(tokens.chat_display, "bubble");  // ST's chat_display 1
+        assert_eq!(tokens.color_chat_bg, "rgba(0,0,0,0.5)");
+        assert_eq!(tokens.color_user_message_bg, "rgba(20,20,20,0.9)");
+        assert_eq!(tokens.color_assistant_message_bg, "rgba(30,30,30,0.9)");
+        assert_eq!(tokens.color_text_italic, "rgba(200,200,200,1)");
+        assert_eq!(tokens.color_text_underline, "rgba(255,255,255,1)");
+        assert_eq!(tokens.color_shadow, "rgba(0,0,0,0.3)"); // already present in this fixture, via shadow_color
         // fields aetheria has that ST doesn't fall back to the default theme
         assert_eq!(tokens.mascot_accent, default_theme_tokens().mascot_accent);
         assert_eq!(tokens.color_text_heading, default_theme_tokens().color_text_heading);
+    }
+
+    #[test]
+    fn light_theme_overrides_underline_for_readability() {
+        let light = light_theme_tokens();
+        assert_eq!(light.color_text_underline, light.color_text);
     }
 
     #[test]
