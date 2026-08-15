@@ -1,6 +1,26 @@
 use leptos::prelude::*;
 use std::collections::HashMap;
 
+/// per-chat generation state, keyed by chat id in [`ChatSignals::gen_states`]
+/// rather than held as flat page-level signals. `ChatPage` is a single
+/// persistent component instance reused across `/chat/A` -> `/chat/B`
+/// navigation (routed by a `Memo<String>` chat_id, not a remount), so a flat
+/// `is_generating`/`streaming_reply` used to bleed a stream started in one
+/// chat into whatever chat was on screen when it finished - see the fix that
+/// introduced this struct for the full writeup. Keying by chat id lets a
+/// background stream keep running correctly for the chat it belongs to while
+/// the view for a different chat stays untouched.
+#[derive(Clone, Default, PartialEq)]
+pub struct GenState {
+    pub is_generating: bool,
+    pub streaming_reply: String,
+    pub current_member: Option<(String, String)>,
+    pub group_reply_log: Vec<(String, String, String)>,
+    pub is_self_reply: bool,
+    pub stream_error: bool,
+    pub regenerating_msg_id: Option<String>,
+}
+
 /// the reactive state generation handlers ([`super::chat_generation`]) and
 /// per-message actions ([`super::chat_actions`]) both need. bundled so those
 /// modules take one param instead of twenty, not because the fields belong
@@ -15,23 +35,28 @@ pub struct ChatSignals {
     pub draft: ReadSignal<String>,
     pub set_draft: WriteSignal<String>,
     pub set_pending_user_text: WriteSignal<Option<String>>,
-    pub streaming_reply: ReadSignal<String>,
-    pub set_streaming_reply: WriteSignal<String>,
-    pub current_member: ReadSignal<Option<(String, String)>>,
-    pub set_current_member: WriteSignal<Option<(String, String)>>,
-    pub set_group_reply_log: WriteSignal<Vec<(String, String, String)>>,
-    pub is_generating: ReadSignal<bool>,
-    pub set_is_generating: WriteSignal<bool>,
-    pub set_stream_error: WriteSignal<bool>,
-    pub set_is_self_reply: WriteSignal<bool>,
+    pub gen_states: RwSignal<HashMap<String, GenState>>,
     pub set_more_menu_open: WriteSignal<bool>,
     pub set_error: WriteSignal<Option<String>>,
     pub send_parent_id: ReadSignal<Option<String>>,
     pub set_send_parent_id: WriteSignal<Option<String>>,
-    pub set_regenerating_msg_id: WriteSignal<Option<String>>,
     pub edit_text: ReadSignal<String>,
     pub set_editing_id: WriteSignal<Option<String>>,
     pub set_selected_children: WriteSignal<HashMap<String, String>>,
+}
+
+impl ChatSignals {
+    /// snapshot of the given chat's generation state, `GenState::default()`
+    /// (not generating, empty) if that chat has no entry yet.
+    pub fn gen_for(&self, id: &str) -> GenState {
+        self.gen_states.with(|m| m.get(id).cloned().unwrap_or_default())
+    }
+
+    /// mutate the given chat's generation state in place, creating a default
+    /// entry first if this is that chat's first generation.
+    pub fn update_gen(&self, id: &str, f: impl FnOnce(&mut GenState)) {
+        self.gen_states.update(|m| f(m.entry(id.to_string()).or_default()));
+    }
 }
 
 /// true when `.main-content` is scrolled at (or near) the bottom. used to

@@ -14,7 +14,7 @@ use super::chat_actions::{
 use super::chat_data::build_fetch_tree;
 use super::chat_generation::{build_continue_gen, build_regenerate, build_respond_as_me, build_send};
 use super::chat_helpers::{Thought, RawPromptPanel, walk_active_branch, speaker_for};
-use super::chat_state::ChatSignals;
+use super::chat_state::{ChatSignals, GenState};
 
 #[component]
 pub fn ChatPage() -> impl IntoView {
@@ -81,7 +81,6 @@ pub fn ChatPage() -> impl IntoView {
 
     let (show_chat_settings, set_show_chat_settings) = signal(false);
     let (pending_delete_message, set_pending_delete_message) = signal::<Option<String>>(None);
-    let (regenerating_msg_id, set_regenerating_msg_id) = signal::<Option<String>>(None);
     let (all_lorebooks, set_all_lorebooks) = signal(Vec::<crate::api::Lorebook>::new());
     let (selected_lorebooks, set_selected_lorebooks) = signal(HashSet::<String>::new());
 
@@ -100,12 +99,16 @@ pub fn ChatPage() -> impl IntoView {
         }
     });
 
+    let (error, set_error) = signal(Option::<String>::None);
+
     let save_chat_settings = move |_: leptos::ev::MouseEvent| {
         let cid = chat_id.get_untracked();
         let selected = selected_lorebooks.get_untracked().into_iter().collect::<Vec<_>>();
         spawn_local(async move {
-            let _ = crate::api::set_chat_lorebooks(&cid, selected).await;
-            set_show_chat_settings.set(false);
+            match crate::api::set_chat_lorebooks(&cid, selected).await {
+                Ok(()) => set_show_chat_settings.set(false),
+                Err(e) => set_error.set(Some(e)),
+            }
         });
     };
 
@@ -165,14 +168,25 @@ pub fn ChatPage() -> impl IntoView {
 
     let (draft, set_draft) = signal(String::new());
     let (pending_user_text, set_pending_user_text) = signal(Option::<String>::None);
-    let (streaming_reply, set_streaming_reply) = signal(String::new());
-    let (current_member, set_current_member) = signal(Option::<(String, String)>::None);
-    let (group_reply_log, set_group_reply_log) = signal(Vec::<(String, String, String)>::new());
-    let (is_generating, set_is_generating) = signal(false);
-    let (stream_error, set_stream_error) = signal(false);
-    let (is_self_reply, set_is_self_reply) = signal(false);
+
+    // keyed by chat id rather than flat page-level signals - ChatPage is a
+    // single persistent instance reused across /chat/A -> /chat/B
+    // navigation, so a flat is_generating/streaming_reply would let a
+    // stream started in chat A keep writing into whatever chat is on
+    // screen when its deltas arrive. see chat_state::GenState.
+    let gen_states = RwSignal::new(HashMap::<String, GenState>::new());
+    let gen_for_current = Memo::new(move |_| {
+        gen_states.with(|m| m.get(&chat_id.get()).cloned().unwrap_or_default())
+    });
+    let is_generating = Memo::new(move |_| gen_for_current.get().is_generating);
+    let streaming_reply = Memo::new(move |_| gen_for_current.get().streaming_reply);
+    let current_member = Memo::new(move |_| gen_for_current.get().current_member);
+    let group_reply_log = Memo::new(move |_| gen_for_current.get().group_reply_log);
+    let stream_error = Memo::new(move |_| gen_for_current.get().stream_error);
+    let is_self_reply = Memo::new(move |_| gen_for_current.get().is_self_reply);
+    let regenerating_msg_id = Memo::new(move |_| gen_for_current.get().regenerating_msg_id);
+
     let (more_menu_open, set_more_menu_open) = signal(false);
-    let (error, set_error) = signal(Option::<String>::None);
     let (revealed_len, set_revealed_len) = signal(0usize);
 
     let (editing_id, set_editing_id) = signal(None::<String>);
@@ -261,20 +275,11 @@ pub fn ChatPage() -> impl IntoView {
         draft,
         set_draft,
         set_pending_user_text,
-        streaming_reply,
-        set_streaming_reply,
-        current_member,
-        set_current_member,
-        set_group_reply_log,
-        is_generating,
-        set_is_generating,
-        set_stream_error,
-        set_is_self_reply,
+        gen_states,
         set_more_menu_open,
         set_error,
         send_parent_id,
         set_send_parent_id,
-        set_regenerating_msg_id,
         edit_text,
         set_editing_id,
         set_selected_children,
@@ -572,11 +577,17 @@ pub fn ChatPage() -> impl IntoView {
                                                                     if let Some(content) = content {
                                                                         let id = id_c.clone();
                                                                         spawn_local(async move {
-                                                                            let _ = crate::api::edit_message(&id, &content).await;
-                                                                            fetch_tree();
+                                                                            match crate::api::edit_message(&id, &content).await {
+                                                                                Ok(()) => {
+                                                                                    set_confirmed_greeting.set(idx);
+                                                                                    fetch_tree();
+                                                                                }
+                                                                                Err(e) => set_error.set(Some(e)),
+                                                                            }
                                                                         });
+                                                                    } else {
+                                                                        set_confirmed_greeting.set(idx);
                                                                     }
-                                                                    set_confirmed_greeting.set(idx);
                                                                 }
                                                             >"✓"</button>
                                                             <button

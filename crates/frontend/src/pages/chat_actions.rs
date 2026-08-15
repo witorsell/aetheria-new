@@ -30,7 +30,11 @@ pub fn build_delete_all_below(
             let to_delete: Vec<String> = branch[idx..].iter().map(|m| m.id.clone()).collect();
             spawn_local(async move {
                 for id in to_delete.into_iter().rev() {
-                    let _ = crate::api::delete_message(&id).await;
+                    if let Err(e) = crate::api::delete_message(&id).await {
+                        signals.set_error.set(Some(e));
+                        fetch_tree();
+                        return;
+                    }
                 }
                 signals.set_error.set(None);
                 fetch_tree();

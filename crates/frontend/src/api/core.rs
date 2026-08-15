@@ -140,6 +140,34 @@ pub async fn stream_post(
     let decoder = web_sys::TextDecoder::new().map_err(|e| format!("{e:?}"))?;
     let mut buffer = String::new();
 
+    fn drain_events(
+        buffer: &mut String,
+        on_delta: &mut impl FnMut(String),
+        on_member: &mut impl FnMut(String, String),
+        on_error: &mut impl FnMut(String),
+    ) {
+        while let Some(pos) = buffer.find("\n\n") {
+            let event_block = buffer[..pos].to_string();
+            buffer.drain(..pos + 2);
+
+            let (kind, data) = parse_event_block(&event_block);
+            let Some(data) = data else { continue };
+            match kind {
+                SseEventKind::Error => on_error(data),
+                SseEventKind::Member => {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
+                        let character_id = parsed.get("character_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+                        let name = parsed.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+                        if let (Some(character_id), Some(name)) = (character_id, name) {
+                            on_member(character_id.to_string(), name.to_string());
+                        }
+                    }
+                }
+                SseEventKind::Data => on_delta(data),
+            }
+        }
+    }
+
     loop {
         let chunk_value = match JsFuture::from(reader.read()).await {
             Ok(v) => v,
@@ -162,30 +190,25 @@ pub async fn stream_post(
         let value = js_sys::Reflect::get(&chunk_value, &JsValue::from_str("value"))
             .map_err(|e| format!("{e:?}"))?;
         let array: js_sys::Uint8Array = value.dyn_into().map_err(|e| format!("{e:?}"))?;
+        let mut options = web_sys::TextDecodeOptions::new();
+        options.stream(true);
         let text = decoder
-            .decode_with_buffer_source(&array)
+            .decode_with_buffer_source_and_options(&array, &options)
             .map_err(|e| format!("{e:?}"))?;
         buffer.push_str(&text);
+        drain_events(&mut buffer, &mut on_delta, &mut on_member, &mut on_error);
+    }
 
-        while let Some(pos) = buffer.find("\n\n") {
-            let event_block = buffer[..pos].to_string();
-            buffer.drain(..pos + 2);
-
-            let (kind, data) = parse_event_block(&event_block);
-            let Some(data) = data else { continue };
-            match kind {
-                SseEventKind::Error => on_error(data),
-                SseEventKind::Member => {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
-                        let character_id = parsed.get("character_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
-                        let name = parsed.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
-                        if let (Some(character_id), Some(name)) = (character_id, name) {
-                            on_member(character_id.to_string(), name.to_string());
-                        }
-                    }
-                }
-                SseEventKind::Data => on_delta(data),
-            }
+    // flush any bytes the streaming decoder held back mid-character on the
+    // final chunk - decode_with_buffer_source_and_options(stream: true)
+    // intentionally withholds an incomplete trailing UTF-8 sequence in case
+    // more bytes are coming, so a plain decode() call is needed once the
+    // stream is actually done to emit it (or drop it if input truly ended
+    // mid-character, which is the correct behavior at EOF)
+    if let Ok(tail) = decoder.decode() {
+        if !tail.is_empty() {
+            buffer.push_str(&tail);
+            drain_events(&mut buffer, &mut on_delta, &mut on_member, &mut on_error);
         }
     }
 
