@@ -184,7 +184,7 @@ fn render_markdown_blocks(text: &str, blocks: &mut Vec<AnyView>, forbid_media: b
                         let title = image_title.take().unwrap_or_default();
                         let proxy_url = format!("/api/proxy?url={}", urlencoding::encode(&url));
                         let view = view! {
-                            <img
+                            <crate::components::proxied_image::ProxiedImage
                                 src=proxy_url
                                 title=title
                                 alt="image"

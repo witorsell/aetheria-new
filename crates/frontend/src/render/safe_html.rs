@@ -201,7 +201,7 @@ fn render_element(name: &str, style: &str, children: Vec<AnyView>, href: Option<
                         // default it renders at native resolution and
                         // overflows the content column.
                         let img_style = format!("max-width: 100%; {style}");
-                        view! { <img src=proxy_url style=img_style alt="image" /> }.into_any()
+                        view! { <crate::components::proxied_image::ProxiedImage src=proxy_url style=img_style alt="image" /> }.into_any()
                     }
                     None => view! {}.into_any(),
                 }

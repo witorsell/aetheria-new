@@ -528,9 +528,11 @@ pub async fn import_character(file: web_sys::File) -> Result<Character, String> 
 /// re-imports a card file onto an already-existing character instead of creating a
 /// new one, so re-downloading an updated card doesn't mean losing the character's
 /// id, chat history, or folder placement. any field the card doesn't carry falls
-/// back to whatever the character already has. tags and greetings are merged in
-/// (nothing already on the character gets removed); the character_book/lorebook
-/// isn't touched, since re-linking it here could silently swap or duplicate lorebooks.
+/// back to whatever the character already has. tags are merged in (nothing already
+/// on the character gets removed), but alternate greetings are a full replace - a
+/// re-synced card's greetings should actually take effect, not just pile up next
+/// to whatever was there before. the character_book/lorebook isn't touched, since
+/// re-linking it here could silently swap or duplicate lorebooks.
 pub async fn sync_character_from_file(character_id: &str, file: web_sys::File) -> Result<(), String> {
     let (data, form) = fetch_card_json(&file).await?;
     let fields = compute_card_fields(&data);
@@ -607,13 +609,17 @@ pub async fn sync_character_from_file(character_id: &str, file: web_sys::File) -
     }
 
     if let Some(greetings) = data.get("alternate_greetings").and_then(|v| v.as_array()) {
+        // full replace, not merge: sync means "match the file", and greetings
+        // are the one field a re-sync is commonly used to fix - regenerating
+        // a card's greetings and re-syncing should actually update them, not
+        // just pile the new ones on top of the old.
         if let Ok(existing) = list_alternate_greetings(character_id).await {
-            let existing_texts: std::collections::HashSet<String> = existing.into_iter().map(|g| g.greeting).collect();
-            for greeting in greetings.iter().filter_map(|v| v.as_str()).filter(|g| !g.is_empty()) {
-                if !existing_texts.contains(greeting) {
-                    let _ = add_alternate_greeting(character_id, greeting).await;
-                }
+            for g in existing {
+                let _ = delete_alternate_greeting(character_id, &g.id).await;
             }
+        }
+        for greeting in greetings.iter().filter_map(|v| v.as_str()).filter(|g| !g.is_empty()) {
+            let _ = add_alternate_greeting(character_id, greeting).await;
         }
     }
 

@@ -36,6 +36,8 @@ So here we are.
 
 ## Recent updates
 Last 7 days only. Older entries get trimmed off.
+- Chat/card images (avatars in messages, `![img]` markdown, raw `<img>` in cards) now retry once the tab regains focus if their load failed while backgrounded - a plain `<img>` never retried on its own, so a chat image could go permanently broken until a full page reload (Aug 15)
+- Re-syncing a character from a file was merging in alternate greetings instead of replacing them, so re-syncing an updated card just piled duplicates on top of the old ones; it's now a full replace like the rest of a sync (Aug 15)
 - A backgrounded mobile tab (or a dead cellular connection) could leave a chat reply stuck "generating" forever with no error and no way to recover but reloading; streaming requests now carry an idle watchdog that aborts and reports an error once a connection goes fully silent (Aug 15)
 - Image/video proxy reuses one pooled HTTP client instead of rebuilding one per request, checks the cache before any network call, and now only serves back actual image/video content instead of whatever a target URL happens to return (Aug 15)
 - Character export was silently dropping creator notes and any linked lorebook, and printing everything as one minified, alphabetically-sorted line; both now round-trip through export and the file comes out pretty-printed with name first (Aug 15)
