@@ -49,7 +49,7 @@ pub async fn login(
     jar: PrivateCookieJar,
     Json(req): Json<LoginRequest>,
 ) -> Result<(PrivateCookieJar, StatusCode), StatusCode> {
-    tracing::info!("Login attempt for username: {}", req.username);
+    tracing::debug!("Login attempt for username: {}", req.username);
     let attempt_key = req.username.to_lowercase();
     let ip_key = client_ip(&headers, connect_info);
 
@@ -64,10 +64,20 @@ pub async fn login(
 
     let result = try_login(&state, &req).await;
     if result.is_err() {
-        let next_count = state.login_attempts.get(&attempt_key).await.unwrap_or(0) + 1;
-        state.login_attempts.insert(attempt_key.clone(), next_count).await;
-        let next_ip_count = state.login_attempts_by_ip.get(&ip_key).await.unwrap_or(0) + 1;
-        state.login_attempts_by_ip.insert(ip_key.clone(), next_ip_count).await;
+        // and_upsert_with serializes concurrent calls on the same key (moka
+        // takes a key-level lock), unlike a plain get-then-insert pair -
+        // two failed logins racing on the same username/IP used to be able
+        // to both read the same starting count and both write count+1,
+        // silently losing an increment and letting more attempts through
+        // than MAX_LOGIN_ATTEMPTS should allow
+        state.login_attempts.entry(attempt_key.clone()).and_upsert_with(|maybe_entry| {
+            let next = maybe_entry.map(|e| e.into_value()).unwrap_or(0) + 1;
+            std::future::ready(next)
+        }).await;
+        state.login_attempts_by_ip.entry(ip_key.clone()).and_upsert_with(|maybe_entry| {
+            let next = maybe_entry.map(|e| e.into_value()).unwrap_or(0) + 1;
+            std::future::ready(next)
+        }).await;
     } else {
         state.login_attempts.invalidate(&attempt_key).await;
         // the IP counter deliberately does NOT reset here: it's tracking
@@ -120,7 +130,7 @@ async fn try_login(state: &AppState, req: &LoginRequest) -> Result<crate::models
         })?;
 
     let Some(user) = user else {
-        tracing::info!("User not found in DB for username: {}", req.username);
+        tracing::warn!("User not found in DB for username: {}", req.username);
         let dummy = PasswordHash::new(dummy_password_hash()).expect("dummy hash is always valid PHC format");
         let _ = Argon2::default().verify_password(req.password.as_bytes(), &dummy);
         return Err(StatusCode::UNAUTHORIZED);

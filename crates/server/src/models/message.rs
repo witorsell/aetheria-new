@@ -173,7 +173,13 @@ pub fn active_branch(tree: &MessageTree) -> Vec<MessageNode> {
         if !has_children {
             break;
         }
-        current_id = branch.last().unwrap().children.last().unwrap().clone();
+        current_id = branch
+            .last()
+            .expect("just pushed a node above, so branch is non-empty")
+            .children
+            .last()
+            .expect("has_children was just checked true for this node")
+            .clone();
     }
 
     branch
@@ -305,7 +311,12 @@ pub async fn tree_from_message(
         return Ok(HashMap::new());
     };
 
-    // BFS to collect descendants up to depth
+    // BFS to collect descendants up to depth. capped independently of depth
+    // since a wide (not just deep) tree can still blow past SQLite's bound
+    // parameter limit in the bulk IN (...) fetch below - a deeply-branched
+    // chat after months of regenerate/sibling use is a real way to hit this,
+    // not just a pathological depth value.
+    const MAX_TREE_NODES: usize = 900;
     let mut result: HashMap<String, MessageNode> = HashMap::new();
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
     queue.push_back((root.id.clone(), 0));
@@ -317,7 +328,7 @@ pub async fn tree_from_message(
     depth_map.insert(root.id.clone(), 0);
 
     while let Some((current_id, current_depth)) = queue.pop_front() {
-        if current_depth >= depth {
+        if current_depth >= depth || all_ids.len() >= MAX_TREE_NODES {
             continue;
         }
         let children = sqlx::query_scalar::<_, String>(
@@ -329,6 +340,9 @@ pub async fn tree_from_message(
         .fetch_all(pool)
         .await?;
         for child_id in children {
+            if all_ids.len() >= MAX_TREE_NODES {
+                break;
+            }
             if !depth_map.contains_key(&child_id) {
                 depth_map.insert(child_id.clone(), current_depth + 1);
                 all_ids.push(child_id.clone());

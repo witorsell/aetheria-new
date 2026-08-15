@@ -23,18 +23,30 @@ pub fn resolve_path(relative: &str) -> std::path::PathBuf {
     if let Ok(root) = std::env::var("AETHERIA_ROOT") {
         return std::path::PathBuf::from(root).join(relative);
     }
-    // walk up from current_exe to find project root
-    let mut p = std::env::current_exe()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .to_path_buf();
-    if p.ends_with("release") || p.ends_with("debug") {
-        if let Some(grandparent) = p.parent().and_then(|parent| parent.parent()) {
-            p = grandparent.to_path_buf();
-        }
-    }
-    p.join(relative)
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    // look for an ancestor directory literally named `target` and use its
+    // parent as the project root - a fixed "strip 2 levels" only holds for
+    // `target/release/server`; a cross-compiled build at
+    // `target/<triple>/release/server` (or any other profile/target nesting
+    // cargo introduces) sits one level deeper and would silently resolve to
+    // the wrong directory instead of failing loudly
+    let root = exe
+        .ancestors()
+        .find(|p| p.file_name().is_some_and(|n| n == "target"))
+        .and_then(|target_dir| target_dir.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| {
+            // no `target` ancestor - expected for a standalone deployment
+            // where the binary was copied out of the cargo tree, but if
+            // that's not what's happening this is exactly the "silently
+            // wrong directory" case AETHERIA_ROOT exists to avoid
+            tracing::warn!(
+                exe = %exe.display(),
+                "no `target` directory found above the running binary; falling back to its own directory as the project root - set AETHERIA_ROOT explicitly if this is wrong",
+            );
+            exe.parent().unwrap_or_else(|| std::path::Path::new(".")).to_path_buf()
+        });
+    root.join(relative)
 }
 
 pub async fn bootstrap_user(db: &db::Db, username: &str, password: &str) {

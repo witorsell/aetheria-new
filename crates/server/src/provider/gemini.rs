@@ -47,7 +47,14 @@ struct GeminiGenerationConfig {
     frequency_penalty: f64,
     #[serde(skip_serializing_if = "is_zero_f64")]
     presence_penalty: f64,
-    max_output_tokens: i32,
+    // unlike Anthropic (max_tokens is a required field) or NovelAI/Horde
+    // (max_length isn't optional in their payload schema either), Gemini's
+    // maxOutputTokens is genuinely optional - omitting it lets the model use
+    // its own default rather than the caller's. so 0 (= "disabled" per
+    // SamplingParams's documented contract) can actually map to "omit" here
+    // instead of substituting an arbitrary fallback value
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking_config: Option<GeminiThinkingConfig>,
 }
@@ -150,7 +157,7 @@ impl ModelProvider for GeminiProvider {
                 top_k: sampling.top_k,
                 frequency_penalty: sampling.frequency_penalty,
                 presence_penalty: sampling.presence_penalty,
-                max_output_tokens: if sampling.max_tokens > 0 { sampling.max_tokens as i32 } else { 8192 },
+                max_output_tokens: if sampling.max_tokens > 0 { Some(sampling.max_tokens as i32) } else { None },
                 thinking_config: sampling
                     .reasoning_effort
                     .to_budget_tokens()
@@ -161,6 +168,18 @@ impl ModelProvider for GeminiProvider {
         Box::pin(async_stream::stream! {
             let mut headers = HeaderMap::new();
             headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+            // sent as a header rather than the ?key= query param Google's
+            // docs also accept - a query param ends up verbatim in server
+            // access logs and any proxy in front of this request, unlike
+            // Anthropic/OpenAI/NovelAI which already authenticate via header
+            let key_header = match HeaderValue::from_str(&api_key) {
+                Ok(key) => key,
+                Err(_) => {
+                    yield Err(ProviderError::Status(400, "API key contains characters that can't be sent in an HTTP header".to_string()));
+                    return;
+                }
+            };
+            headers.insert("x-goog-api-key", key_header);
 
             let base = if base_url.is_empty() {
                 "https://generativelanguage.googleapis.com".to_string()
@@ -168,7 +187,7 @@ impl ModelProvider for GeminiProvider {
                 base_url.trim_end_matches('/').to_string()
             };
 
-            let url = format!("{}/v1beta/models/{}:streamGenerateContent?alt=sse&key={}", base, model, api_key);
+            let url = format!("{}/v1beta/models/{}:streamGenerateContent?alt=sse", base, model);
 
             let client = http_client;
             let response = client
