@@ -7,9 +7,12 @@ impl Writer {
             let result = sqlx::query("UPDATE settings SET updated_at = ? WHERE user_id = (SELECT MAX(id) FROM users)")
                 .bind(now)
                 .execute(&mut *conn)
-                .await
-                .map(|_| ());
-            if result.is_err() {
+                .await;
+            let needs_insert = match &result {
+                Ok(res) => res.rows_affected() == 0,
+                Err(_) => true,
+            };
+            if needs_insert {
                 let _ = sqlx::query(
                     "INSERT OR IGNORE INTO settings (user_id, api_base_url, api_key, model_name, system_prompt, context_limit, post_history_instructions, forbid_external_media, updated_at) VALUES ((SELECT MAX(id) FROM users), '', '', '', '', 8192, '', 0, ?)",
                 )
@@ -17,7 +20,7 @@ impl Writer {
                 .execute(&mut *conn)
                 .await;
             }
-            result
+            result.map(|_| ())
         })).await
     }
 
@@ -28,12 +31,14 @@ impl Writer {
     ) -> sqlx::Result<()> {
         self.dispatch(move |conn| Box::pin(async move {
             let now = chrono_now_millis();
+            let mut tx = conn.begin().await?;
+
             let _ = sqlx::query(
                 "INSERT OR IGNORE INTO settings (user_id, api_base_url, api_key, model_name, system_prompt, context_limit, post_history_instructions, forbid_external_media, provider_type, updated_at) VALUES (?, '', '', '', '', 8192, '', 0, 'openai', ?)",
             )
             .bind(user_id)
             .bind(now)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await;
 
             sqlx::query(
@@ -69,7 +74,7 @@ impl Writer {
             .bind(&update.reasoning_effort)
             .bind(now)
             .bind(user_id)
-            .execute(&mut *conn)
+            .execute(&mut *tx)
             .await?;
 
             if let Some(key) = update.api_key {
@@ -78,7 +83,7 @@ impl Writer {
                 sqlx::query("UPDATE settings SET api_key = ? WHERE user_id = ?")
                     .bind(&encrypted)
                     .bind(user_id)
-                    .execute(&mut *conn)
+                    .execute(&mut *tx)
                     .await?;
             }
 
@@ -88,7 +93,7 @@ impl Writer {
                 sqlx::query("UPDATE settings SET summary_api_key = ? WHERE user_id = ?")
                     .bind(&encrypted)
                     .bind(user_id)
-                    .execute(&mut *conn)
+                    .execute(&mut *tx)
                     .await?;
             }
 
@@ -98,10 +103,11 @@ impl Writer {
                 sqlx::query("UPDATE settings SET embedding_api_key = ? WHERE user_id = ?")
                     .bind(&encrypted)
                     .bind(user_id)
-                    .execute(&mut *conn)
+                    .execute(&mut *tx)
                     .await?;
             }
 
+            tx.commit().await?;
             Ok(())
         })).await
     }
