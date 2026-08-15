@@ -242,6 +242,12 @@ pub fn ThemeEditorPage() -> impl IntoView {
                     {color_field!("Muted text", color_text_muted)}
                     {color_field!("Error", color_error)}
                     {color_field!("Mascot accent", mascot_accent)}
+                    {color_field!("Chat background", color_chat_bg)}
+                    {color_field!("Your messages", color_user_message_bg)}
+                    {color_field!("Their messages", color_assistant_message_bg)}
+                    {color_field!("Italic text", color_text_italic)}
+                    {color_field!("Underline text", color_text_underline)}
+                    {color_field!("Shadow", color_shadow)}
 
                     <div class="field">
                         <label>"Font scale"</label>
