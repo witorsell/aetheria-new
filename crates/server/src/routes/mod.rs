@@ -52,6 +52,7 @@ pub fn build_router(state: AppState) -> Router {
         // tags
         .route("/api/character-tags", get(characters::list_all_character_tags))
         .route("/api/tags", get(characters::list_tags).post(characters::create_tag))
+        .route("/api/tags/batch", post(characters::create_tags_batch))
         .route("/api/tags/{id}", delete(characters::delete_tag))
         // folders
         .route("/api/folders", get(characters::list_folders).post(characters::create_folder))

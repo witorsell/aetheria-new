@@ -215,6 +215,20 @@ pub async fn create_tag(name: &str, color: Option<&str>) -> Result<Tag, String> 
         .map_err(|e| e.to_string())
 }
 
+pub async fn create_tags_batch(names: &[String]) -> Result<Vec<Tag>, String> {
+    Request::post("/api/tags/batch")
+        .header("Content-Type", "application/json")
+        .credentials(web_sys::RequestCredentials::Include)
+        .json(names)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 pub async fn delete_tag(id: &str) -> Result<(), String> {
     Request::delete(&format!("/api/tags/{id}"))
         .credentials(web_sys::RequestCredentials::Include)
@@ -312,9 +326,55 @@ pub async fn delete_folder(id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-pub async fn import_character(file: web_sys::File) -> Result<Character, String> {
+struct CardFields {
+    name: Option<String>,
+    description: Option<String>,
+    personality: Option<String>,
+    scenario: Option<String>,
+    first_message: Option<String>,
+    sample_chat: Option<String>,
+    system_prompt: Option<String>,
+    post_history_instructions: Option<String>,
+    extensions: Option<String>,
+}
+
+// card description/personality are intentionally cross-mapped here (not a bug):
+// `description` ends up holding the card's creator notes (or personality, if there
+// were no notes but a separate description existed), while `personality` holds the
+// description+personality combined. matches how this app has always read v2 cards.
+fn compute_card_fields(data: &serde_json::Value) -> CardFields {
+    let name = extract_card_field_str(data, &["name", "ch_name", "char_name", "title"]).map(str::to_string);
+
+    let card_desc = extract_card_field_str(data, &["description", "char_persona", "persona"]);
+    let card_pers = extract_card_field_str(data, &["personality", "summary"]);
+    let card_notes = extract_card_field_str(data, &["creator_notes", "creatorcomment", "comment", "notes", "author_notes"]);
+
+    let personality_combined = match (card_desc, card_pers) {
+        (Some(d), Some(p)) if d != p => format!("{d}\n\n{p}"),
+        (Some(d), _) => d.to_string(),
+        (None, Some(p)) => p.to_string(),
+        (None, None) => String::new(),
+    };
+    let personality = if personality_combined.is_empty() { None } else { Some(personality_combined) };
+
+    let description = card_notes.map(str::to_string).or_else(|| if card_desc.is_some() { card_pers.map(str::to_string) } else { None });
+
+    CardFields {
+        name,
+        description,
+        personality,
+        scenario: extract_card_field_str(data, &["scenario", "world_scenario"]).map(str::to_string),
+        first_message: extract_card_field_str(data, &["first_mes", "first_message", "greeting", "entry"]).map(str::to_string),
+        sample_chat: extract_card_field_str(data, &["mes_example", "example_dialogue", "definition", "examples"]).map(str::to_string),
+        system_prompt: extract_card_field_str(data, &["system_prompt", "system", "system_prompt_prefix"]).map(str::to_string),
+        post_history_instructions: extract_card_field_str(data, &["post_history_instructions", "post_history", "post_history_prompt"]).map(str::to_string),
+        extensions: data.get("extensions").map(|v| v.to_string()),
+    }
+}
+
+async fn fetch_card_json(file: &web_sys::File) -> Result<(serde_json::Value, web_sys::FormData), String> {
     let form = web_sys::FormData::new().map_err(|_| "Failed to create FormData")?;
-    form.append_with_blob("file", &file).map_err(|_| "Failed to append file")?;
+    form.append_with_blob("file", file).map_err(|_| "Failed to append file")?;
 
     let resp = Request::post("/api/import/character")
         .credentials(web_sys::RequestCredentials::Include)
@@ -329,45 +389,31 @@ pub async fn import_character(file: web_sys::File) -> Result<Character, String> 
     }
 
     let json_val: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {}", e))?;
-    let data = json_val.get("data").unwrap_or(&json_val);
+    let data = json_val.get("data").cloned().unwrap_or(json_val);
+    Ok((data, form))
+}
 
-    let name = extract_card_field_str(data, &["name", "ch_name", "char_name", "title"]).unwrap_or("Imported Character");
-
-    let card_desc = extract_card_field_str(data, &["description", "char_persona", "persona"]);
-    let card_pers = extract_card_field_str(data, &["personality", "summary"]);
-    let card_notes = extract_card_field_str(data, &["creator_notes", "creatorcomment", "comment", "notes", "author_notes"]);
-
-    let personality_combined = match (card_desc, card_pers) {
-        (Some(d), Some(p)) if d != p => format!("{d}\n\n{p}"),
-        (Some(d), _) => d.to_string(),
-        (None, Some(p)) => p.to_string(),
-        (None, None) => String::new(),
-    };
-    let personality = if personality_combined.is_empty() { None } else { Some(personality_combined.as_str()) };
-
-    let description = card_notes.or(if card_desc.is_some() { card_pers } else { None });
-    let scenario = extract_card_field_str(data, &["scenario", "world_scenario"]);
-    let first_message = extract_card_field_str(data, &["first_mes", "first_message", "greeting", "entry"]);
-    let sample_chat = extract_card_field_str(data, &["mes_example", "example_dialogue", "definition", "examples"]);
-    let system_prompt = extract_card_field_str(data, &["system_prompt", "system", "system_prompt_prefix"]);
-    let post_history_instructions = extract_card_field_str(data, &["post_history_instructions", "post_history", "post_history_prompt"]);
-    let extensions = data.get("extensions").map(|v| v.to_string());
+pub async fn import_character(file: web_sys::File) -> Result<Character, String> {
+    let (data, form) = fetch_card_json(&file).await?;
+    let data = &data;
+    let fields = compute_card_fields(data);
+    let name = fields.name.unwrap_or_else(|| "Imported Character".to_string());
 
     let input = CharacterInput {
-        name,
-        description,
-        personality,
-        scenario,
-        first_message,
+        name: &name,
+        description: fields.description.as_deref(),
+        personality: fields.personality.as_deref(),
+        scenario: fields.scenario.as_deref(),
+        first_message: fields.first_message.as_deref(),
         avatar_url: None,
-        sample_chat,
-        system_prompt,
-        post_history_instructions,
+        sample_chat: fields.sample_chat.as_deref(),
+        system_prompt: fields.system_prompt.as_deref(),
+        post_history_instructions: fields.post_history_instructions.as_deref(),
         prefill: None,
         insert_depth_prompt: None,
         insert_depth: None,
         persona: None,
-        extensions: extensions.as_deref(),
+        extensions: fields.extensions.as_deref(),
         folder_id: None,
         talkativeness: None,
     };
@@ -402,14 +448,18 @@ pub async fn import_character(file: web_sys::File) -> Result<Character, String> 
     // comes from an untrusted file.
     const MAX_IMPORTED_TAGS: usize = 50;
     if let Some(card_tags) = data.get("tags").and_then(|v| v.as_array()) {
-        let mut tag_ids = Vec::new();
-        for name in card_tags.iter().filter_map(|v| v.as_str()).map(str::trim).filter(|n| !n.is_empty()).take(MAX_IMPORTED_TAGS) {
-            if let Ok(tag) = create_tag(name, None).await {
-                tag_ids.push(tag.id);
+        let names: Vec<String> = card_tags
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .take(MAX_IMPORTED_TAGS)
+            .collect();
+        if let Ok(tags) = create_tags_batch(&names).await {
+            let tag_ids: Vec<String> = tags.into_iter().map(|t| t.id).collect();
+            if !tag_ids.is_empty() {
+                let _ = set_character_tags(&chara.id, &tag_ids).await;
             }
-        }
-        if !tag_ids.is_empty() {
-            let _ = set_character_tags(&chara.id, &tag_ids).await;
         }
     }
 
@@ -473,6 +523,101 @@ pub async fn import_character(file: web_sys::File) -> Result<Character, String> 
     }
 
     Ok(chara)
+}
+
+/// re-imports a card file onto an already-existing character instead of creating a
+/// new one, so re-downloading an updated card doesn't mean losing the character's
+/// id, chat history, or folder placement. any field the card doesn't carry falls
+/// back to whatever the character already has. tags and greetings are merged in
+/// (nothing already on the character gets removed); the character_book/lorebook
+/// isn't touched, since re-linking it here could silently swap or duplicate lorebooks.
+pub async fn sync_character_from_file(character_id: &str, file: web_sys::File) -> Result<(), String> {
+    let (data, form) = fetch_card_json(&file).await?;
+    let fields = compute_card_fields(&data);
+    let current = get_character(character_id).await?;
+
+    let pick = |card: Option<String>, existing: &str| -> String {
+        card.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| existing.to_string())
+    };
+
+    let name = pick(fields.name, &current.name);
+    let description = pick(fields.description, &current.description);
+    let personality = pick(fields.personality, &current.personality);
+    let scenario = pick(fields.scenario, &current.scenario);
+    let first_message = pick(fields.first_message, &current.first_message);
+    let sample_chat = pick(fields.sample_chat, &current.sample_chat);
+    let system_prompt = pick(fields.system_prompt, &current.system_prompt);
+    let post_history_instructions = pick(fields.post_history_instructions, &current.post_history_instructions);
+    let extensions = pick(fields.extensions, &current.extensions);
+
+    let input = CharacterInput {
+        name: &name,
+        description: Some(&description),
+        personality: Some(&personality),
+        scenario: Some(&scenario),
+        first_message: Some(&first_message),
+        avatar_url: current.avatar_url.as_deref(),
+        sample_chat: Some(&sample_chat),
+        system_prompt: Some(&system_prompt),
+        post_history_instructions: Some(&post_history_instructions),
+        prefill: Some(&current.prefill),
+        insert_depth_prompt: Some(&current.insert_depth_prompt),
+        insert_depth: Some(current.insert_depth),
+        persona: Some(&current.persona),
+        extensions: Some(&extensions),
+        folder_id: current.folder_id.as_deref(),
+        talkativeness: Some(current.talkativeness),
+    };
+    update_character(character_id, input).await?;
+
+    match Request::post(&format!("/api/characters/{character_id}/avatar"))
+        .credentials(web_sys::RequestCredentials::Include)
+        .body(form)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+    {
+        Ok(resp) if !resp.ok() => {
+            let body = resp.text().await.unwrap_or_default();
+            web_sys::console::warn_1(&format!("avatar upload failed during sync: {body}").into());
+        }
+        Err(e) => web_sys::console::warn_1(&format!("avatar upload failed during sync: {e}").into()),
+        _ => {}
+    }
+
+    const MAX_IMPORTED_TAGS: usize = 50;
+    if let Some(card_tags) = data.get("tags").and_then(|v| v.as_array()) {
+        let names: Vec<String> = card_tags
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .take(MAX_IMPORTED_TAGS)
+            .collect();
+        if !names.is_empty() {
+            if let (Ok(new_tags), Ok(mut tag_ids)) = (create_tags_batch(&names).await, get_character_tags(character_id).await) {
+                for tag in new_tags {
+                    if !tag_ids.contains(&tag.id) {
+                        tag_ids.push(tag.id);
+                    }
+                }
+                let _ = set_character_tags(character_id, &tag_ids).await;
+            }
+        }
+    }
+
+    if let Some(greetings) = data.get("alternate_greetings").and_then(|v| v.as_array()) {
+        if let Ok(existing) = list_alternate_greetings(character_id).await {
+            let existing_texts: std::collections::HashSet<String> = existing.into_iter().map(|g| g.greeting).collect();
+            for greeting in greetings.iter().filter_map(|v| v.as_str()).filter(|g| !g.is_empty()) {
+                if !existing_texts.contains(greeting) {
+                    let _ = add_alternate_greeting(character_id, greeting).await;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn extract_card_field_str<'a>(data: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {

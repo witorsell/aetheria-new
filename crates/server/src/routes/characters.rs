@@ -263,6 +263,35 @@ pub async fn create_tag(
         })
 }
 
+pub async fn create_tags_batch(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    Json(names): Json<Vec<String>>,
+) -> Result<Json<Vec<Tag>>, ApiError> {
+    const MAX_BATCH_TAGS: usize = 50;
+    let names: Vec<String> = names
+        .into_iter()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .take(MAX_BATCH_TAGS)
+        .collect();
+    for name in &names {
+        if name.len() > MAX_TAG_NAME {
+            return Err(ApiError::bad_request("Tag name too long (max 64 characters)"));
+        }
+    }
+    state
+        .db
+        .writer
+        .create_tags_batch(user_id, names)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            tracing::error!(error = %e, "failed to batch create tags");
+            ApiError::internal("Failed to create tags")
+        })
+}
+
 pub async fn delete_tag(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,

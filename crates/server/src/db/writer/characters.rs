@@ -153,6 +153,17 @@ impl Writer {
                 .await?
                 .rows_affected()
                 > 0;
+            if deleted {
+                // character_tags rows for this character are already gone via
+                // ON DELETE CASCADE - drop any tag that's now unused by anything else.
+                sqlx::query(
+                    "DELETE FROM tags WHERE user_id = ? AND id NOT IN (SELECT tag_id FROM character_tags WHERE user_id = ?)",
+                )
+                .bind(user_id)
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
+            }
             tx.commit().await?;
             Ok(deleted)
         })).await
@@ -239,6 +250,39 @@ impl Writer {
             .bind(&input.name)
             .fetch_one(&mut *conn)
             .await
+        })).await
+    }
+
+    pub async fn create_tags_batch(
+        &self, user_id: i64,
+        names: Vec<String>,
+    ) -> sqlx::Result<Vec<crate::models::character::Tag>> {
+        self.dispatch(move |conn| Box::pin(async move {
+            let mut tx = conn.begin().await?;
+            let now = chrono_now_millis();
+            let mut tags = Vec::with_capacity(names.len());
+            for name in &names {
+                let id = uuid::Uuid::new_v4().to_string();
+                sqlx::query(
+                    "INSERT OR IGNORE INTO tags (user_id, id, name, color, created_at) VALUES (?, ?, ?, '#888888', ?)",
+                )
+                .bind(user_id)
+                .bind(&id)
+                .bind(name)
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+                let tag = sqlx::query_as::<_, crate::models::character::Tag>(
+                    "SELECT * FROM tags WHERE user_id = ? AND name = ?",
+                )
+                .bind(user_id)
+                .bind(name)
+                .fetch_one(&mut *tx)
+                .await?;
+                tags.push(tag);
+            }
+            tx.commit().await?;
+            Ok(tags)
         })).await
     }
 

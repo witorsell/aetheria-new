@@ -52,56 +52,78 @@ pub fn CharacterEditorPage() -> impl IntoView {
     let (tab, set_tab) = signal(EditorTab::General);
     let (loading, set_loading) = signal(true);
 
-    let _ = LocalResource::new(move || {
-        let cid = character_id.get();
-        async move {
-            if !cid.is_empty() && cid != "new" {
-                set_loading.set(true);
-                match api::get_character(&cid).await {
-                    Ok(c) => {
-                        set_name.set(c.name);
-                        set_description.set(c.description);
-                        set_scenario.set(c.scenario);
-                        set_personality.set(c.personality);
-                        set_first_message.set(c.first_message);
-                        set_system_prompt.set(c.system_prompt);
-                        set_post_history_instructions.set(c.post_history_instructions);
-                        set_prefill.set(c.prefill);
-                        set_insert_depth_prompt.set(c.insert_depth_prompt);
-                        set_insert_depth.set(c.insert_depth);
-                        set_sample_chat.set(c.sample_chat);
-                        set_persona.set(c.persona);
-                        set_talkativeness.set(c.talkativeness);
-                        set_avatar_url.set(c.avatar_url);
-                        match api::list_alternate_greetings(&cid).await {
-                            Ok(g) => set_alternate_greetings.set(g),
-                            Err(_) => {}
-                        }
-                        match api::get_character_lorebooks(&cid).await {
-                            Ok(ids) => set_selected_lorebooks.set(ids.into_iter().collect()),
-                            Err(_) => {}
-                        }
-                        match api::get_character_tags(&cid).await {
-                            Ok(ids) => set_selected_tags.set(ids.into_iter().collect()),
-                            Err(_) => {}
-                        }
+    let load_character = move |cid: String| async move {
+        if !cid.is_empty() && cid != "new" {
+            set_loading.set(true);
+            match api::get_character(&cid).await {
+                Ok(c) => {
+                    set_name.set(c.name);
+                    set_description.set(c.description);
+                    set_scenario.set(c.scenario);
+                    set_personality.set(c.personality);
+                    set_first_message.set(c.first_message);
+                    set_system_prompt.set(c.system_prompt);
+                    set_post_history_instructions.set(c.post_history_instructions);
+                    set_prefill.set(c.prefill);
+                    set_insert_depth_prompt.set(c.insert_depth_prompt);
+                    set_insert_depth.set(c.insert_depth);
+                    set_sample_chat.set(c.sample_chat);
+                    set_persona.set(c.persona);
+                    set_talkativeness.set(c.talkativeness);
+                    set_avatar_url.set(c.avatar_url);
+                    match api::list_alternate_greetings(&cid).await {
+                        Ok(g) => set_alternate_greetings.set(g),
+                        Err(_) => {}
                     }
-                    Err(e) => set_error.set(Some(e)),
+                    match api::get_character_lorebooks(&cid).await {
+                        Ok(ids) => set_selected_lorebooks.set(ids.into_iter().collect()),
+                        Err(_) => {}
+                    }
+                    match api::get_character_tags(&cid).await {
+                        Ok(ids) => set_selected_tags.set(ids.into_iter().collect()),
+                        Err(_) => {}
+                    }
                 }
-                set_loading.set(false);
-            } else {
-                set_loading.set(false);
+                Err(e) => set_error.set(Some(e)),
             }
-            match api::list_lorebooks().await {
-                Ok(lbs) => set_all_lorebooks.set(lbs),
-                Err(_) => {}
-            }
-            match api::list_tags().await {
-                Ok(tags) => set_all_tags.set(tags),
-                Err(_) => {}
+            set_loading.set(false);
+        } else {
+            set_loading.set(false);
+        }
+        match api::list_lorebooks().await {
+            Ok(lbs) => set_all_lorebooks.set(lbs),
+            Err(_) => {}
+        }
+        match api::list_tags().await {
+            Ok(tags) => set_all_tags.set(tags),
+            Err(_) => {}
+        }
+    };
+
+    let _ = LocalResource::new(move || load_character(character_id.get()));
+
+    let (syncing, set_syncing) = signal(false);
+    let on_sync = move |ev: leptos::ev::Event| {
+        let target = event_target::<web_sys::HtmlInputElement>(&ev);
+        if let Some(files) = target.files() {
+            if let Some(file) = files.get(0) {
+                let cid = character_id.get_untracked();
+                set_syncing.set(true);
+                set_error.set(None);
+                set_success.set(None);
+                spawn_local(async move {
+                    match api::sync_character_from_file(&cid, file).await {
+                        Ok(()) => {
+                            load_character(cid).await;
+                            set_success.set(Some("Synced from file.".to_string()));
+                        }
+                        Err(e) => set_error.set(Some(e)),
+                    }
+                    set_syncing.set(false);
+                });
             }
         }
-    });
+    };
 
     view! {
         <div class="editor-container">
@@ -110,7 +132,17 @@ pub fn CharacterEditorPage() -> impl IntoView {
             </Show>
 
             <Show when=move || !loading.get()>
-                <h1>{move || if is_new() { "New Character" } else { "Edit Character" }}</h1>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                    <h1 style="margin: 0;">{move || if is_new() { "New Character" } else { "Edit Character" }}</h1>
+                    <Show when=move || !is_new()>
+                        <div class="file-upload-wrapper">
+                            <input type="file" id="sync-upload" class="file-upload-input" accept=".png,.json" disabled=move || syncing.get() on:change=on_sync />
+                            <label for="sync-upload" class="file-upload-label" title="Re-import a card onto this character - existing fields, tags, and greetings are kept and merged, not wiped.">
+                                {move || if syncing.get() { "Syncing…" } else { "Sync from file" }}
+                            </label>
+                        </div>
+                    </Show>
+                </div>
 
                 <div class="editor-tabs">
                     <button
@@ -411,7 +443,7 @@ pub fn CharacterEditorPage() -> impl IntoView {
                     <Show when=move || tab.get() == EditorTab::Tags>
                         <div class="tab-content">
                             <label style="margin-bottom: 0.5rem; display: block; font-weight: 500;">"Tags"</label>
-                            <div style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 400px; overflow-y: auto; padding: 0.5rem; border: 1px solid var(--color-border);">
+                            <div style="display: flex; flex-flow: row wrap; gap: 0.4rem; max-height: 250px; overflow-y: auto; padding: 0.5rem; border: 1px solid var(--color-border);">
                                 <Show when=move || all_tags.get().is_empty()>
                                     <p class="muted">"No tags yet. Create one below."</p>
                                 </Show>
@@ -424,10 +456,12 @@ pub fn CharacterEditorPage() -> impl IntoView {
                                     let name = t.name.clone();
 
                                     view! {
-                                        <div style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--color-border); transition: background 0.2s;"
-                                            class:active=move || selected_tags.get().contains(&id)>
-                                            <label style="display: flex; flex-direction: row; align-items: center; gap: 0.5rem; cursor: pointer; flex: 1; min-width: 0;">
-                                                <input type="checkbox"
+                                        <div style=move || format!(
+                                            "display: inline-flex; flex-direction: row; align-items: center; gap: 0.3rem; padding: 0.2rem 0.3rem 0.2rem 0.55rem; border-radius: 999px; transition: background 0.2s, border-color 0.2s; border: 1px solid {};",
+                                            if selected_tags.get().contains(&id) { "var(--accent)" } else { "var(--color-border)" }
+                                        )>
+                                            <label style="display: flex; flex-direction: row; align-items: center; gap: 0.35rem; cursor: pointer; font-size: 0.85rem; white-space: nowrap;">
+                                                <input type="checkbox" style="width: 0.8rem; height: 0.8rem;"
                                                     prop:checked=move || selected_tags.get().contains(&id3)
                                                     on:change=move |ev| {
                                                         let checked = event_target_checked(&ev);
@@ -440,10 +474,11 @@ pub fn CharacterEditorPage() -> impl IntoView {
                                                         });
                                                     }
                                                 />
-                                                <span style=format!("display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: {color}; flex-shrink: 0;")></span>
+                                                <span style=format!("display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: {color}; flex-shrink: 0;")></span>
                                                 <span>{name.clone()}</span>
                                             </label>
                                             <button type="button" class="danger small" title="Delete this tag everywhere"
+                                                style="line-height: 1; padding: 0.1rem 0.35rem; font-size: 0.75rem;"
                                                 on:click=move |_| {
                                                     let id_for_delete = id4.clone();
                                                     let name_for_confirm = name.clone();
