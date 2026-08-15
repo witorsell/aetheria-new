@@ -37,7 +37,7 @@ So here we are.
 ## Recent updates
 - Persona library: multiple named personas with descriptions, switchable from settings, replacing the old single global persona field (Aug 14)
 - One-click install script, and `chat.rs`/`SettingsView` split into smaller focused modules for easier maintenance going forward (Aug 13)
-- Full theme system: SillyTavern-style token editor with instant live preview, import/export (including direct SillyTavern theme file import), plus a redesigned default look and a mascot (Aug 12)
+- Full theme system: SillyTavern-style token editor with instant live preview, import/export (including direct SillyTavern UI theme JSON import), plus a redesigned default look and a mascot (Aug 12)
 - Group chats with multiple activation strategies (List, Natural) and per-character talkativeness (Aug 6-7)
 - Character card import/export as SillyTavern-compatible PNG cards (Aug 5-6)
 - Character alternate greetings, tags, and folders (Aug 5-6)
