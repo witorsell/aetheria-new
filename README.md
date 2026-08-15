@@ -36,6 +36,7 @@ So here we are.
 
 ## Recent updates
 Last 7 days only. Older entries get trimmed off.
+- Personas can now actually be edited (name/description) from settings instead of only created and deleted; added an opt-in toggle to make `{{user}}` always resolve to your display name instead of the active persona's name (Aug 15)
 - Chat/card images (avatars in messages, `![img]` markdown, raw `<img>` in cards) now retry once the tab regains focus if their load failed while backgrounded - a plain `<img>` never retried on its own, so a chat image could go permanently broken until a full page reload (Aug 15)
 - Re-syncing a character from a file was merging in alternate greetings instead of replacing them, so re-syncing an updated card just piled duplicates on top of the old ones; it's now a full replace like the rest of a sync (Aug 15)
 - A backgrounded mobile tab (or a dead cellular connection) could leave a chat reply stuck "generating" forever with no error and no way to recover but reloading; streaming requests now carry an idle watchdog that aborts and reports an error once a connection goes fully silent (Aug 15)

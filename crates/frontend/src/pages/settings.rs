@@ -15,6 +15,7 @@ pub fn SettingsPage() -> impl IntoView {
     let (context_limit, set_context_limit) = signal(8192i64);
     let (post_history_instructions, set_post_history_instructions) = signal(String::new());
     let (forbid_external_media, set_forbid_external_media) = signal(false);
+    let (display_name_overrides_persona, set_display_name_overrides_persona) = signal(false);
     let (provider_type, set_provider_type) = signal(String::from("openai"));
     let (summary_provider_type, set_summary_provider_type) = signal(String::new());
     let (summary_api_base_url, set_summary_api_base_url) = signal(String::new());
@@ -69,6 +70,7 @@ pub fn SettingsPage() -> impl IntoView {
             set_context_limit.set(view.context_limit);
             set_post_history_instructions.set(view.post_history_instructions);
             set_forbid_external_media.set(view.forbid_external_media);
+            set_display_name_overrides_persona.set(view.display_name_overrides_persona);
             set_provider_type.set(view.provider_type);
             set_summary_provider_type.set(view.summary_provider_type);
             set_summary_api_base_url.set(view.summary_api_base_url);
@@ -119,6 +121,7 @@ pub fn SettingsPage() -> impl IntoView {
                 context_limit: context_limit.get_untracked(),
                 post_history_instructions: post_history_instructions.get_untracked(),
                 forbid_external_media: forbid_external_media.get_untracked(),
+                display_name_overrides_persona: display_name_overrides_persona.get_untracked(),
                 provider_type: provider_type.get_untracked(),
                 summary_provider_type: summary_provider_type.get_untracked(),
                 summary_api_base_url: summary_api_base_url.get_untracked(),
@@ -341,7 +344,10 @@ pub fn SettingsPage() -> impl IntoView {
                 forbid_external_media=forbid_external_media.into()
             />
 
-            <PersonaManager />
+            <PersonaManager
+                display_name_overrides_persona=display_name_overrides_persona.into()
+                set_display_name_overrides_persona
+            />
 
             <div style="margin-bottom: 3rem;">
                 <h1 style="font-family: var(--font-heading); font-size: 3rem; font-weight: 300; margin: 0; color: #fff; letter-spacing: -0.02em;">"System Manifest"</h1>

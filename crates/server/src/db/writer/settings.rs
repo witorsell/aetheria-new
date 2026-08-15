@@ -42,7 +42,7 @@ impl Writer {
             .await;
 
             sqlx::query(
-                "UPDATE settings SET api_base_url = ?, model_name = ?, system_prompt = ?, context_limit = ?, post_history_instructions = ?, forbid_external_media = ?, provider_type = ?, \
+                "UPDATE settings SET api_base_url = ?, model_name = ?, system_prompt = ?, context_limit = ?, post_history_instructions = ?, forbid_external_media = ?, display_name_overrides_persona = ?, provider_type = ?, \
                  summary_provider_type = ?, summary_api_base_url = ?, summary_model_name = ?, summary_context_limit = ?, \
                  embedding_source = ?, embedding_api_base_url = ?, embedding_model_name = ?, \
                  rag_top_k = ?, rag_score_threshold = ?, \
@@ -55,6 +55,7 @@ impl Writer {
             .bind(update.context_limit)
             .bind(&update.post_history_instructions)
             .bind(update.forbid_external_media)
+            .bind(update.display_name_overrides_persona)
             .bind(&update.provider_type)
             .bind(&update.summary_provider_type)
             .bind(&update.summary_api_base_url)

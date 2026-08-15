@@ -51,6 +51,7 @@ pub(crate) struct PreparedGeneration {
 pub(crate) async fn fetch_user_persona(
     pool: &sqlx::SqlitePool,
     user_id: i64,
+    display_name_overrides_persona: bool,
 ) -> Result<(String, Option<String>), crate::error::ApiError> {
     let user = crate::models::user::find_by_id(pool, user_id).await?;
     let fallback_name = user
@@ -63,7 +64,14 @@ pub(crate) async fn fetch_user_persona(
     };
 
     match crate::models::persona::get(pool, user_id, &active_id).await? {
-        Some(persona) => Ok((persona.name, Some(persona.description))),
+        // {{user}} normally takes the active persona's name, letting the fiction
+        // address you as whoever you're roleplaying rather than your account name
+        // - display_name_overrides_persona opts out of that per user, for people
+        // who'd rather {{user}} always say their display name regardless.
+        Some(persona) => {
+            let name = if display_name_overrides_persona { fallback_name } else { persona.name };
+            Ok((name, Some(persona.description)))
+        }
         // active_persona_id pointed at a persona that's gone (shouldn't
         // happen, delete_persona clears the pointer, but don't 500 over it)
         None => Ok((fallback_name, None)),
@@ -149,7 +157,7 @@ pub(crate) async fn assemble_generation(
     let api_key =
         crate::models::settings::get_decrypted_api_key(&state.db.read_pool, user_id, &state.encryption_key).await?;
 
-    let (user_name, user_persona) = fetch_user_persona(&state.db.read_pool, user_id).await?;
+    let (user_name, user_persona) = fetch_user_persona(&state.db.read_pool, user_id, settings.display_name_overrides_persona).await?;
 
     let (lorebook_before, lorebook_after) = resolve_lorebook_context(
         state, user_id, chat, character, history, new_user_message, &user_name, settings.context_limit, speaker_names,

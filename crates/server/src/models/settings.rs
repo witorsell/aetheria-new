@@ -11,6 +11,8 @@ pub struct SettingsUpdate {
     pub context_limit: i64,
     pub post_history_instructions: String,
     pub forbid_external_media: bool,
+    #[serde(default)]
+    pub display_name_overrides_persona: bool,
     pub provider_type: String,
     #[serde(default)]
     pub summary_provider_type: String,
@@ -61,6 +63,7 @@ pub struct SettingsExport {
     pub context_limit: i64,
     pub post_history_instructions: String,
     pub forbid_external_media: bool,
+    pub display_name_overrides_persona: bool,
     pub provider_type: String,
     pub active_preset_id: Option<String>,
     pub summary_provider_type: String,
@@ -159,6 +162,7 @@ pub struct SettingsView {
     pub context_limit: i64,
     pub post_history_instructions: String,
     pub forbid_external_media: bool,
+    pub display_name_overrides_persona: bool,
     pub active_preset_id: Option<String>,
     #[serde(flatten)]
     pub summary: SummarySettings,
@@ -197,6 +201,7 @@ struct SettingsRow {
     context_limit: i64,
     post_history_instructions: String,
     forbid_external_media: bool,
+    display_name_overrides_persona: bool,
     provider_type: String,
     active_preset_id: Option<String>,
     summary_provider_type: String,
@@ -237,6 +242,7 @@ pub async fn get_view(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<Set
         context_limit: row.context_limit,
         post_history_instructions: row.post_history_instructions,
         forbid_external_media: row.forbid_external_media,
+        display_name_overrides_persona: row.display_name_overrides_persona,
         active_preset_id: row.active_preset_id,
         summary: SummarySettings {
             provider_type: row.summary_provider_type,
@@ -278,6 +284,7 @@ pub async fn get_export(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result<S
         context_limit: row.context_limit,
         post_history_instructions: row.post_history_instructions,
         forbid_external_media: row.forbid_external_media,
+        display_name_overrides_persona: row.display_name_overrides_persona,
         provider_type: row.provider_type,
         active_preset_id: row.active_preset_id,
         summary_provider_type: row.summary_provider_type,
@@ -310,6 +317,7 @@ impl SettingsExport {
             context_limit: self.context_limit,
             post_history_instructions: self.post_history_instructions,
             forbid_external_media: self.forbid_external_media,
+            display_name_overrides_persona: self.display_name_overrides_persona,
             provider_type: self.provider_type,
             summary_provider_type: self.summary_provider_type,
             summary_api_base_url: self.summary_api_base_url,

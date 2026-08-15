@@ -141,7 +141,10 @@ pub(super) fn UserProfileForm(
 }
 
 #[component]
-pub(super) fn PersonaManager() -> impl IntoView {
+pub(super) fn PersonaManager(
+    display_name_overrides_persona: Signal<bool>,
+    set_display_name_overrides_persona: WriteSignal<bool>,
+) -> impl IntoView {
     let personas = LocalResource::new(|| async move { crate::api::list_personas().await });
     let me = LocalResource::new(|| async move { crate::api::fetch_me().await });
 
@@ -151,6 +154,10 @@ pub(super) fn PersonaManager() -> impl IntoView {
     let (creating, set_creating) = signal(false);
     let (delete_target, set_delete_target) = signal(Option::<(String, String)>::None);
     let (deleting, set_deleting) = signal(false);
+    let (edit_target, set_edit_target) = signal(Option::<String>::None);
+    let (edit_name, set_edit_name) = signal(String::new());
+    let (edit_description, set_edit_description) = signal(String::new());
+    let (saving, set_saving) = signal(false);
 
     let create = move |_| {
         if creating.get_untracked() {
@@ -181,6 +188,35 @@ pub(super) fn PersonaManager() -> impl IntoView {
         });
     };
 
+    let save_edit = move |_: leptos::ev::MouseEvent| {
+        let Some(id) = edit_target.get_untracked() else { return };
+        if saving.get_untracked() {
+            return;
+        }
+        let name = edit_name.get_untracked();
+        if name.trim().is_empty() {
+            set_error.set("Name cannot be empty".to_string());
+            return;
+        }
+        set_saving.set(true);
+        let description = edit_description.get_untracked();
+        spawn_local(async move {
+            let input = crate::api::PersonaInput {
+                name: &name,
+                description: if description.trim().is_empty() { None } else { Some(&description) },
+            };
+            match crate::api::update_persona(&id, input).await {
+                Ok(()) => {
+                    set_error.set(String::new());
+                    set_edit_target.set(None);
+                    personas.refetch();
+                }
+                Err(e) => set_error.set(e),
+            }
+            set_saving.set(false);
+        });
+    };
+
     let confirm_delete = move |_: leptos::ev::MouseEvent| {
         let Some((id, _)) = delete_target.get_untracked() else { return };
         set_deleting.set(true);
@@ -202,6 +238,19 @@ pub(super) fn PersonaManager() -> impl IntoView {
         <div>
             <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Personas"</label>
 
+            <div class="field" style="margin: 0 0 1rem 0;">
+                <label class="checkbox-field" style="display: flex; align-items: center; gap: 0.5rem; color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; cursor: pointer;">
+                    <input
+                        type="checkbox"
+                        prop:checked=display_name_overrides_persona
+                        on:change=move |ev| set_display_name_overrides_persona.set(event_target_checked(&ev))
+                        style="accent-color: #fff;"
+                    />
+                    "DISPLAY NAME OVERRIDES ACTIVE PERSONA"
+                </label>
+                <div style="color: var(--color-text-muted); font-family: monospace; font-size: 0.75rem; margin-top: 0.5rem; opacity: 0.7; margin-left: 1.5rem;">"{{user}} uses your display name even while a persona is active, instead of the persona's name."</div>
+            </div>
+
             <Suspense fallback=move || view! { <div>"Loading personas..."</div> }>
                 {move || {
                     let list = personas.get().and_then(|r| r.ok()).unwrap_or_default();
@@ -213,6 +262,37 @@ pub(super) fn PersonaManager() -> impl IntoView {
                                 let id_for_activate = p.id.clone();
                                 let id_for_delete = p.id.clone();
                                 let name_for_delete = p.name.clone();
+                                let id_for_edit = p.id.clone();
+                                let is_editing = move || edit_target.get().as_deref() == Some(id_for_edit.as_str());
+                                let id_for_edit_click = p.id.clone();
+                                let name_for_edit = p.name.clone();
+                                let description_for_edit = p.description.clone();
+
+                                if is_editing() {
+                                    return view! {
+                                        <div style="display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; border: 1px solid var(--color-border); background: rgba(0,0,0,0.15);">
+                                            <input
+                                                placeholder="Persona name"
+                                                prop:value=edit_name
+                                                on:input=move |ev| set_edit_name.set(event_target_value(&ev))
+                                                style="background: rgba(0,0,0,0.2); border: 1px solid var(--color-border); color: #fff; padding: 0.5rem;"
+                                            />
+                                            <textarea
+                                                placeholder="Describe this persona..."
+                                                prop:value=edit_description
+                                                on:input=move |ev| set_edit_description.set(event_target_value(&ev))
+                                                style="background: rgba(0,0,0,0.2); border: 1px solid var(--color-border); color: #fff; padding: 0.5rem; min-height: 80px;"
+                                            ></textarea>
+                                            <div style="display: flex; gap: 0.5rem;">
+                                                <button on:click=save_edit disabled=move || saving.get()>
+                                                    {move || if saving.get() { "Saving..." } else { "Save" }}
+                                                </button>
+                                                <button on:click=move |_| { set_edit_target.set(None); set_error.set(String::new()); }>"Cancel"</button>
+                                            </div>
+                                        </div>
+                                    }.into_any();
+                                }
+
                                 view! {
                                     <div style="display: flex; align-items: center; gap: 1rem; padding: 0.75rem; border: 1px solid var(--color-border); background: rgba(0,0,0,0.15); flex-wrap: wrap;">
                                         {p.avatar_url.clone().map(|url| view! {
@@ -256,10 +336,16 @@ pub(super) fn PersonaManager() -> impl IntoView {
                                             }.into_any()
                                         }}
                                         <button on:click=move |_| {
+                                            set_edit_target.set(Some(id_for_edit_click.clone()));
+                                            set_edit_name.set(name_for_edit.clone());
+                                            set_edit_description.set(description_for_edit.clone());
+                                            set_error.set(String::new());
+                                        }>"Edit"</button>
+                                        <button on:click=move |_| {
                                             set_delete_target.set(Some((id_for_delete.clone(), name_for_delete.clone())));
                                         }>"Delete"</button>
                                     </div>
-                                }
+                                }.into_any()
                             }).collect_view()}
                         </div>
                     }
