@@ -372,25 +372,54 @@ fn compute_card_fields(data: &serde_json::Value) -> CardFields {
     }
 }
 
+async fn read_file_bytes(file: &web_sys::File) -> Result<Vec<u8>, String> {
+    // a card png is the portrait plus a text chunk. 20MB matches the avatar
+    // upload limit; past that the file cannot be stored anyway.
+    if file.size() > 20.0 * 1024.0 * 1024.0 {
+        return Err("File too large. Maximum size is 20MB".to_string());
+    }
+    let blob: &web_sys::Blob = file.as_ref();
+    let value = wasm_bindgen_futures::JsFuture::from(blob.array_buffer())
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    let buffer = js_sys::Uint8Array::new(&value);
+    let mut bytes = vec![0; buffer.length() as usize];
+    buffer.copy_to(&mut bytes);
+    Ok(bytes)
+}
+
 async fn fetch_card_json(file: &web_sys::File) -> Result<(serde_json::Value, web_sys::FormData), String> {
     let form = web_sys::FormData::new().map_err(|_| "Failed to create FormData")?;
     form.append_with_blob("file", file).map_err(|_| "Failed to append file")?;
 
-    let resp = Request::post("/api/import/character")
+    let bytes = read_file_bytes(file).await?;
+    let json_val = super::card_bytes::parse_card_bytes(&bytes)?;
+    let data = json_val.get("data").cloned().unwrap_or(json_val);
+    Ok((data, form))
+}
+
+#[derive(serde::Deserialize)]
+struct CreatedId {
+    id: String,
+}
+
+/// the created character echoes every text field. a card whose text is past
+/// ~16KB never finishes that reply, so ask for the id only.
+async fn create_character_id(input: CharacterInput<'_>) -> Result<String, String> {
+    let resp = Request::post("/api/characters")
+        .header("Content-Type", "application/json")
+        .header("X-Response-Brief", "1")
         .credentials(web_sys::RequestCredentials::Include)
-        .body(form.clone())
+        .json(&input)
         .map_err(|e| e.to_string())?
         .send()
         .await
         .map_err(|e| e.to_string())?;
-
     if !resp.ok() {
         return Err(resp.text().await.unwrap_or_default());
     }
-
-    let json_val: serde_json::Value = resp.json().await.map_err(|e| format!("JSON parse error: {}", e))?;
-    let data = json_val.get("data").cloned().unwrap_or(json_val);
-    Ok((data, form))
+    let created: CreatedId = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(created.id)
 }
 
 pub async fn import_character(file: web_sys::File) -> Result<Character, String> {
@@ -418,7 +447,26 @@ pub async fn import_character(file: web_sys::File) -> Result<Character, String> 
         talkativeness: None,
     };
 
-    let chara = create_character(input).await?;
+    let id = create_character_id(input).await?;
+    let chara = Character {
+        id,
+        name: name.clone(),
+        description: fields.description.clone().unwrap_or_default(),
+        personality: fields.personality.clone().unwrap_or_default(),
+        scenario: fields.scenario.clone().unwrap_or_default(),
+        first_message: fields.first_message.clone().unwrap_or_default(),
+        avatar_url: None,
+        sample_chat: fields.sample_chat.clone().unwrap_or_default(),
+        system_prompt: fields.system_prompt.clone().unwrap_or_default(),
+        post_history_instructions: fields.post_history_instructions.clone().unwrap_or_default(),
+        prefill: String::new(),
+        insert_depth_prompt: String::new(),
+        insert_depth: 3,
+        persona: "{}".to_string(),
+        extensions: fields.extensions.clone().unwrap_or_else(|| "{}".to_string()),
+        folder_id: None,
+        talkativeness: 0.5,
+    };
 
     match Request::post(&format!("/api/characters/{}/avatar", chara.id))
         .credentials(web_sys::RequestCredentials::Include)

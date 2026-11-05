@@ -8,6 +8,26 @@ server {
 
     client_max_body_size ${MAX_UPLOAD_SIZE_MB}M;
 
+    location /uploads/ {
+        auth_request /internal/aetheria-auth;
+        alias /home/img/aetheria/crates/server/uploads/;
+        gzip off;
+        sendfile on;
+        tcp_nopush on;
+        add_header Cache-Control "private, max-age=3600";
+        add_header Accept-Ranges bytes;
+    }
+
+    location = /internal/aetheria-auth {
+        internal;
+        proxy_pass http://${AETHERIA_BIND}/api/me;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host $host;
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
     location / {
         proxy_pass http://aetheria_backend;
         proxy_set_header Host $host;

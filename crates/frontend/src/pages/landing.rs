@@ -1,126 +1,173 @@
+use crate::api::{self, Character, RecentChat};
 use leptos::prelude::*;
-use leptos_router::hooks::use_navigate;
-use leptos_router::NavigateOptions;
+use leptos_router::components::A;
 
-const SPEED_PRESETS: [(u32, &str); 4] = [(0, "Disabled"), (20, "Slow"), (40, "Normal"), (80, "Fast")];
+fn format_relative(ts_ms: i64) -> String {
+    let now = js_sys::Date::now() as i64;
+    let secs = ((now - ts_ms) / 1000).max(0);
+    if secs < 60 {
+        return "just now".to_string();
+    }
+    let mins = secs / 60;
+    if mins < 60 {
+        return format!("{mins}m ago");
+    }
+    let hrs = mins / 60;
+    if hrs < 24 {
+        return format!("{hrs}h ago");
+    }
+    let days = hrs / 24;
+    if days < 30 {
+        return format!("{days}d ago");
+    }
+    format!("{}mo ago", days / 30)
+}
 
-fn speed_to_preset_index(speed: u32) -> usize {
-    SPEED_PRESETS
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, (value, _))| (*value as i64 - speed as i64).abs())
-        .map(|(index, _)| index)
-        .unwrap_or(2)
+fn initial(name: &str) -> String {
+    name.chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_else(|| "?".to_string())
+}
+
+#[component]
+fn Avatar(name: String, url: Option<String>, forbid_media: bool) -> impl IntoView {
+    let letter = initial(&name);
+    view! {
+        <div class="desk-avatar" aria-hidden="true">
+            {if let Some(url) = url.filter(|_| !forbid_media) {
+                view! { <img src=url alt="" /> }.into_any()
+            } else {
+                view! { <span>{letter}</span> }.into_any()
+            }}
+        </div>
+    }
+}
+
+#[component]
+fn ChatRow(chat: RecentChat, forbid_media: bool) -> impl IntoView {
+    let who = chat
+        .group_name
+        .clone()
+        .or_else(|| chat.character_name.clone())
+        .unwrap_or_else(|| "Chat".to_string());
+    let stored = chat.title.trim();
+    let generic = stored.is_empty() || stored.eq_ignore_ascii_case("chat") || stored.eq_ignore_ascii_case("untitled");
+    let title = if generic { who.clone() } else { stored.to_string() };
+    let avatar_url = chat.group_avatar.clone().or_else(|| chat.character_avatar.clone());
+    let when = format_relative(chat.updated_at);
+    let detail = if title == who {
+        when.clone()
+    } else {
+        format!("{who} · {when}")
+    };
+    let href = format!("/chat/{}", chat.id);
+    view! {
+        <A href=href attr:class="desk-row">
+            <Avatar name=who url=avatar_url forbid_media=forbid_media />
+            <span class="desk-row-text">
+                <span class="desk-row-title">{title}</span>
+                <span class="desk-row-detail">{detail}</span>
+            </span>
+        </A>
+    }
+}
+
+#[component]
+fn CharacterRow(character: Character, forbid_media: bool) -> impl IntoView {
+    let href = format!("/characters/{}", character.id);
+    let name = character.name.clone();
+    view! {
+        <A href=href attr:class="desk-row">
+            <Avatar name=name.clone() url=character.avatar_url.clone() forbid_media=forbid_media />
+            <span class="desk-row-text">
+                <span class="desk-row-title">{name}</span>
+            </span>
+        </A>
+    }
 }
 
 #[component]
 pub fn LandingPage() -> impl IntoView {
-    let navigate = use_navigate();
-    let navigate_store = StoredValue::new(navigate.clone());
-    let (hovered, set_hovered) = signal(false);
-
-    let settings = LocalResource::new(|| async move { crate::api::get_settings().await });
-    let (api_base_url, set_api_base_url) = signal(String::new());
-    let (model_name, set_model_name) = signal(String::new());
-    let (context_limit, set_context_limit) = signal(8192i64);
-    let (speed_index, _) = signal(speed_to_preset_index(crate::api::get_text_speed()));
-
-    Effect::new(move |_| {
-        if let Some(Ok(view)) = settings.get() {
-            set_api_base_url.set(view.api_base_url);
-            set_model_name.set(view.model_name);
-            set_context_limit.set(view.context_limit);
-        }
-    });
+    let settings = LocalResource::new(|| async move { api::get_settings().await.ok() });
+    let recent = LocalResource::new(|| async move { api::list_recent_chats().await });
+    let characters = LocalResource::new(|| async move { api::list_characters().await });
 
     view! {
-        <div class="landing-page landing-layout">
-            <div style="position: absolute; top: -20%; left: -10%; width: 50vw; height: 50vw; background: radial-gradient(circle, rgba(139, 92, 246, 0.03) 0%, rgba(10, 10, 12, 0) 70%); border-radius: 50%; pointer-events: none;"></div>
-            
-            <div class="landing-left">
-                <div>
-                    <h1 style="font-family: var(--font-heading); font-size: clamp(4rem, 10vw, 10rem); font-weight: 300; letter-spacing: -0.04em; color: #ffffff; margin: 0; line-height: 0.85; margin-bottom: 2rem;">
-                        "Aetheria."
-                    </h1>
-                    <form method="POST" action="/api/logout">
-                        <button type="submit" class="btn" style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text-muted);">"Logout"</button>
-                    </form>
-                    <div style="margin-top: 4rem; max-width: 500px; display: grid; gap: 2rem;">
-                        <p style="font-family: var(--font-body); font-size: 1.1rem; color: #8a8a93; line-height: 1.7; font-weight: 300;">
-                            "The ink hasn't dried. The stage is empty. This is an archive of synthetic souls, waiting to be summoned from the margins."
-                        </p>
-                        
-                        <div style="display: flex; gap: 2rem; align-items: center; padding-top: 2rem; border-top: 1px solid var(--color-border);">
-                            <button 
-                                style=move || format!("background: transparent; border: none; color: {}; font-family: var(--font-heading); font-size: 1.8rem; font-style: italic; padding: 0 0 0.2rem 0; cursor: pointer; border-bottom: 1px solid {}; transition: all 0.3s ease;", if hovered.get() { "#a89fc2" } else { "#ffffff" }, if hovered.get() { "rgba(168, 159, 194, 0.3)" } else { "rgba(255, 255, 255, 0.3)" })
-                                on:mouseover=move |_| set_hovered.set(true)
-                                on:mouseout=move |_| set_hovered.set(false)
-                                on:click={
-                                    let nav = navigate_store;
-                                    move |_| nav.get_value()("/characters/new/edit", NavigateOptions::default())
-                                }
-                            >
-                                "Begin drafting"
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
-                <div style="display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 4rem; color: #4a4a53; font-family: monospace; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase;">
-                    <div>"SYS_VER_2.0.4"</div>
-                    <div>"LOCAL_RUNTIME"</div>
-                    <div>"PROTOCOL_STRICT"</div>
-                    <a href="/terms" style="color: #4a4a53; text-decoration: none;">"TERMS"</a>
-                    <a href="/privacy" style="color: #4a4a53; text-decoration: none;">"PRIVACY"</a>
-                </div>
-            </div>
-            
-            <div class="landing-right">
-                <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-                    <div style="color: #ffffff; font-family: var(--font-heading); font-size: 2rem; font-style: italic; letter-spacing: -0.02em;">"System parameters."</div>
-                    <p style="color: #6a6a73; font-size: 1.05rem; line-height: 1.6; max-width: 400px; font-weight: 300;">
-                        "Configure the neural engine before stepping into the void."
-                    </p>
-                </div>
-                
-                <div style="display: flex; flex-direction: column; gap: 1.5rem; max-width: 400px; height: 100%; overflow-y: auto; padding-right: 1rem;" class="settings-display">
-                    <div class="field" style="margin-bottom: 0;">
-                        <div style="color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">"Provider"</div>
-                        <div style="color: #fff; font-family: monospace; font-size: 0.9rem; word-break: break-all;">{move || if api_base_url.get().is_empty() { "Not configured".to_string() } else { api_base_url.get() }}</div>
-                    </div>
-                    
-                    <div class="field" style="margin-bottom: 0;">
-                        <div style="color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">"Model"</div>
-                        <div style="color: #fff; font-family: monospace; font-size: 0.9rem;">{move || if model_name.get().is_empty() { "Not configured".to_string() } else { model_name.get() }}</div>
-                    </div>
+        <div class="desk">
+            {move || {
+                let forbid_media = settings.get().flatten().map(|s| s.forbid_external_media).unwrap_or(false);
+                let model = settings.get().flatten().map(|s| s.model_name).unwrap_or_default();
+                let model_line = if model.trim().is_empty() {
+                    view! {
+                        <A href="/settings" attr:class="desk-model desk-model-missing">"No model set"</A>
+                    }.into_any()
+                } else {
+                    view! {
+                        <A href="/settings" attr:class="desk-model">{model}</A>
+                    }.into_any()
+                };
 
-                    <div class="field" style="margin-bottom: 0;">
-                        <div style="color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">"Context Limit"</div>
-                        <div style="color: #fff; font-family: monospace; font-size: 0.9rem;">{move || format!("{} tokens", context_limit.get())}</div>
-                    </div>
-                    
-                    <div class="field" style="margin-bottom: 0;">
-                        <div style="color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">"Streaming Speed"</div>
-                        <div style="color: #fff; font-family: monospace; font-size: 0.9rem;">{move || SPEED_PRESETS[speed_index.get()].1}</div>
-                    </div>
+                let body = match (recent.get(), characters.get()) {
+                    (None, _) | (_, None) => view! {
+                        <p class="desk-status">"Loading…"</p>
+                    }.into_any(),
+                    (Some(Err(err)), _) => view! {
+                        <p class="error">{err}</p>
+                    }.into_any(),
+                    (_, Some(Err(err))) => view! {
+                        <p class="error">{err}</p>
+                    }.into_any(),
+                    (Some(Ok(chats)), Some(Ok(people))) => {
+                        let chats_view = if chats.is_empty() {
+                            ().into_any()
+                        } else {
+                            view! {
+                                <section class="desk-section">
+                                    <h1>"Continue"</h1>
+                                    <div class="desk-list">
+                                        {chats.into_iter().map(|chat| view! {
+                                            <ChatRow chat=chat forbid_media=forbid_media />
+                                        }).collect_view()}
+                                    </div>
+                                </section>
+                            }.into_any()
+                        };
+                        let people_view = if people.is_empty() {
+                            view! {
+                                <section class="desk-section">
+                                    <h1>"Characters"</h1>
+                                    <p class="desk-status">"No characters yet."</p>
+                                </section>
+                            }.into_any()
+                        } else {
+                            let shown: Vec<Character> = people.into_iter().take(8).collect();
+                            view! {
+                                <section class="desk-section">
+                                    <h1>"Characters"</h1>
+                                    <div class="desk-list">
+                                        {shown.into_iter().map(|character| view! {
+                                            <CharacterRow character=character forbid_media=forbid_media />
+                                        }).collect_view()}
+                                    </div>
+                                </section>
+                            }.into_any()
+                        };
+                        view! {
+                            {chats_view}
+                            {people_view}
+                            <div class="desk-actions">
+                                <A href="/characters/new/edit" attr:class="desk-primary">"New character"</A>
+                            </div>
+                        }.into_any()
+                    }
+                };
 
-                    <div style="margin-top: 2rem;">
-                        <button 
-                            style="background: transparent; border: none; color: #a89fc2; font-family: monospace; font-size: 0.9rem; padding: 0; cursor: pointer; border-bottom: 1px dotted rgba(168, 159, 194, 0.5); transition: all 0.3s ease;"
-                            on:click={
-                                let nav = navigate_store;
-                                move |_| nav.get_value()("/settings", NavigateOptions::default())
-                            }
-                        >
-                            "Configure System ->"
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <div style="position: absolute; bottom: -8rem; right: -4rem; text-align: right; color: rgba(255, 255, 255, 0.015); font-family: var(--font-heading); font-size: clamp(20rem, 40vw, 40rem); line-height: 0.8; user-select: none; pointer-events: none; font-style: italic;">
-                "Ae"
-            </div>
+                view! {
+                    {model_line}
+                    {body}
+                }
+            }}
         </div>
     }
 }

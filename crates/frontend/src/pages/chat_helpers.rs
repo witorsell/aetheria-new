@@ -97,13 +97,85 @@ pub(super) fn walk_active_branch(
             break;
         }
         branch.push(node.clone());
-        current_id = selected_children
-            .get(&node.id)
+        // a swipe that points at a message which was deleted is not a leaf.
+        // stopping here is what left only the opening exchange on screen.
+        let chosen = selected_children.get(&node.id).filter(|id| tree.messages.contains_key(id.as_str()));
+        current_id = chosen
             .cloned()
-            .unwrap_or_else(|| node.children.last().unwrap().clone());
+            .or_else(|| node.children.iter().rev().find(|id| tree.messages.contains_key(id.as_str())).cloned())
+            .unwrap_or_default();
+        if current_id.is_empty() {
+            break;
+        }
     }
 
     branch
+}
+
+#[cfg(test)]
+mod tests {
+    use super::walk_active_branch;
+    use std::collections::HashMap;
+
+    fn node(id: &str, parent: Option<&str>, children: &[&str]) -> crate::api::MessageNode {
+        crate::api::MessageNode {
+            id: id.to_string(),
+            parent_id: parent.map(str::to_string),
+            role: "assistant".to_string(),
+            content: String::new(),
+            visible: true,
+            deleted: false,
+            created_at: 0,
+            children: children.iter().map(|s| s.to_string()).collect(),
+            raw_prompt: None,
+            prompt_tokens: None,
+            context_limit: None,
+            character_id: None,
+        }
+    }
+
+    fn tree(root: &str, nodes: Vec<crate::api::MessageNode>) -> crate::api::MessageTree {
+        crate::api::MessageTree {
+            root_id: Some(root.to_string()),
+            messages: nodes.into_iter().map(|n| (n.id.clone(), n)).collect(),
+            character: None,
+            group: None,
+        }
+    }
+
+    #[test]
+    fn a_missing_swipe_does_not_stop_the_walk() {
+        let tree = tree(
+            "a",
+            vec![
+                node("a", None, &["b"]),
+                node("b", Some("a"), &["c", "d"]),
+                node("c", Some("b"), &[]),
+                node("d", Some("b"), &[]),
+            ],
+        );
+        let mut selected = HashMap::new();
+        selected.insert("b".to_string(), "gone".to_string());
+        let ids: Vec<_> = walk_active_branch(&tree, &selected).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["a", "b", "d"]);
+    }
+
+    #[test]
+    fn a_live_swipe_is_still_followed() {
+        let tree = tree(
+            "a",
+            vec![
+                node("a", None, &["b"]),
+                node("b", Some("a"), &["c", "d"]),
+                node("c", Some("b"), &[]),
+                node("d", Some("b"), &[]),
+            ],
+        );
+        let mut selected = HashMap::new();
+        selected.insert("b".to_string(), "c".to_string());
+        let ids: Vec<_> = walk_active_branch(&tree, &selected).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["a", "b", "c"]);
+    }
 }
 
 pub(super) fn regeneration_parent_id(branch: &[crate::api::MessageNode]) -> Option<String> {

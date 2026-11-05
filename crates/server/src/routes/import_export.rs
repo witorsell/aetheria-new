@@ -471,6 +471,85 @@ pub async fn export_character(
         serde_json::to_string_pretty(&v2_json).unwrap_or_default(),
     ).into_response()
 }
+/// character-book v2 stores entries as an array. a SillyTavern world-info
+/// file stores them as an object keyed by uid, with `key` instead of `keys`.
+fn lorebook_entry_list(book: &Value) -> Vec<Value> {
+    let Some(raw) = book.get("entries") else {
+        return Vec::new();
+    };
+    match raw {
+        Value::Array(items) => items.clone(),
+        Value::Object(map) => {
+            let mut items: Vec<(i64, Value)> = map
+                .iter()
+                .filter(|(_, entry)| {
+                    entry.get("content").is_some() || entry.get("key").is_some() || entry.get("keys").is_some()
+                })
+                .map(|(key, entry)| {
+                    let uid = entry
+                        .get("uid")
+                        .and_then(|v| v.as_i64())
+                        .or_else(|| key.parse().ok())
+                        .unwrap_or(0);
+                    (uid, entry.clone())
+                })
+                .collect();
+            items.sort_by_key(|(uid, _)| *uid);
+            items.into_iter().map(|(_, entry)| entry).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn entry_string_list(entry: &Value, names: &[&str]) -> Value {
+    for name in names {
+        let Some(value) = entry.get(*name) else { continue };
+        if let Some(items) = value.as_array() {
+            return Value::Array(items.clone());
+        }
+        if let Some(text) = value.as_str() {
+            let parts: Vec<Value> = text
+                .split(',')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(|part| Value::String(part.to_string()))
+                .collect();
+            return Value::Array(parts);
+        }
+    }
+    json!([])
+}
+
+fn entry_enabled(entry: &Value) -> Option<bool> {
+    if let Some(enabled) = entry.get("enabled").and_then(|v| v.as_bool()) {
+        return Some(enabled);
+    }
+    if let Some(disabled) = entry.get("disable").or_else(|| entry.get("disabled")).and_then(|v| v.as_bool()) {
+        return Some(!disabled);
+    }
+    None
+}
+
+/// SillyTavern world_info_position: 0 before the character, 1 after it,
+/// and 2+ are author's note, depth, and example slots this app does not
+/// have. those still have to land somewhere the scanner reads, which is
+/// the after bucket.
+fn entry_position(entry: &Value) -> Option<String> {
+    match entry.get("position") {
+        Some(Value::String(text)) => Some(match text.as_str() {
+            "before" | "before_char" => "before_char".to_string(),
+            "after" | "after_char" => "after_char".to_string(),
+            other => other.to_string(),
+        }),
+        Some(Value::Number(number)) => Some(if number.as_i64() == Some(0) {
+            "before_char".to_string()
+        } else {
+            "after_char".to_string()
+        }),
+        _ => None,
+    }
+}
+
 /// import/export target the character-book v2 shape (the same interchange
 /// format character cards embed their world info under), so a lorebook
 /// exported here can be dropped into SillyTavern and vice versa. fields
@@ -511,14 +590,25 @@ pub async fn import_lorebook(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid JSON").into_response(),
     };
 
+    // a character card dropped on the lorebook importer carries its world info
+    // under data.character_book, not at the top
+    let book = book
+        .get("data")
+        .and_then(|data| data.get("character_book"))
+        .filter(|inner| inner.get("entries").is_some())
+        .unwrap_or(&book);
+
     let name = book.get("name").and_then(|v| v.as_str()).unwrap_or("Imported Lorebook").to_string();
     let lorebook_input = crate::models::lorebook::CreateLorebookInput {
         user_id: Some(user_id),
         name,
         description: book.get("description").and_then(|v| v.as_str()).map(str::to_string),
-        scan_depth: book.get("scan_depth").and_then(|v| v.as_i64()),
-        token_budget: book.get("token_budget").and_then(|v| v.as_i64()),
-        recursive_scanning: book.get("recursive_scanning").and_then(|v| v.as_bool()),
+        scan_depth: book.get("scan_depth").or_else(|| book.get("scanDepth")).and_then(|v| v.as_i64()),
+        token_budget: book.get("token_budget").or_else(|| book.get("tokenBudget")).and_then(|v| v.as_i64()),
+        recursive_scanning: book
+            .get("recursive_scanning")
+            .or_else(|| book.get("recursiveScanning"))
+            .and_then(|v| v.as_bool()),
         extensions: book.get("extensions").map(|v| v.to_string()),
     };
 
@@ -527,43 +617,67 @@ pub async fn import_lorebook(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lorebook").into_response(),
     };
 
-    let no_entries = Vec::new();
-    let entries = book.get("entries").and_then(|v| v.as_array()).unwrap_or(&no_entries);
+    let entries = lorebook_entry_list(book);
 
-    for entry in entries {
+    for entry in &entries {
         let ext = entry.get("extensions").cloned().unwrap_or(json!({}));
-        let keys = entry.get("keys").cloned().unwrap_or(json!([]));
-        let secondary_keys = entry.get("secondary_keys").cloned().unwrap_or(json!([]));
+        let keys = entry_string_list(entry, &["keys", "key"]);
+        let secondary_keys = entry_string_list(entry, &["secondary_keys", "keysecondary", "secondaryKeys"]);
 
         let entry_input = crate::models::lorebook::CreateLorebookEntryInput {
             user_id: Some(user_id),
             lorebook_id: lorebook.id.clone(),
-            name: entry.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            name: entry
+                .get("name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .or_else(|| entry.get("comment").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string(),
             entry: entry.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             keywords: Some(keys.to_string()),
-            priority: entry.get("insertion_order").and_then(|v| v.as_i64()),
-            weight: ext.get("weight").and_then(|v| v.as_i64()),
-            enabled: entry.get("enabled").and_then(|v| v.as_bool()),
+            priority: entry
+                .get("insertion_order")
+                .or_else(|| entry.get("order"))
+                .and_then(|v| v.as_i64()),
+            weight: ext.get("weight").or_else(|| entry.get("weight")).and_then(|v| v.as_i64()),
+            enabled: entry_enabled(entry),
             comment: entry.get("comment").and_then(|v| v.as_str()).map(str::to_string),
             secondary_keys: Some(secondary_keys.to_string()),
             constant: entry.get("constant").and_then(|v| v.as_bool()),
-            position: entry.get("position").and_then(|v| v.as_str()).map(str::to_string),
+            position: entry_position(entry),
             // SillyTavern's own real defaults (see its `convertCharacterBook`
             // in world-info.js) when these are absent entirely: probability
             // 100, useProbability true. sending our own None here would let
             // the DB's unwrap_or(0)/unwrap_or(false) apply instead, silently
             // turning "no probability info" into "never activates".
-            probability: Some(ext.get("probability").and_then(|v| v.as_i64()).unwrap_or(100)),
-            use_probability: Some(ext.get("useProbability").and_then(|v| v.as_bool()).unwrap_or(true)),
+            probability: Some(
+                ext.get("probability")
+                    .or_else(|| entry.get("probability"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(100),
+            ),
+            use_probability: Some(
+                ext.get("useProbability")
+                    .or_else(|| entry.get("useProbability"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+            ),
             selective: entry.get("selective").and_then(|v| v.as_bool()),
-            selective_logic: ext.get("selectiveLogic").and_then(|v| v.as_i64()),
+            selective_logic: ext
+                .get("selectiveLogic")
+                .or_else(|| entry.get("selectiveLogic"))
+                .and_then(|v| v.as_i64()),
             // our own export writes this back out as "excludeRecursion" (see
             // export_lorebook below) for a clean round trip, but real
             // SillyTavern-authored cards use snake_case "exclude_recursion"
             // (confirmed against SillyTavern's own source), check both.
+            // standalone world-info files put the flag on the entry itself.
             exclude_recursion: ext
                 .get("excludeRecursion")
                 .or_else(|| ext.get("exclude_recursion"))
+                .or_else(|| entry.get("excludeRecursion"))
+                .or_else(|| entry.get("exclude_recursion"))
                 .and_then(|v| v.as_bool()),
         };
 

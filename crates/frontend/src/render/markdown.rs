@@ -95,6 +95,7 @@ fn render_time_header(header: &str) -> AnyView {
 pub fn render_markdown(text: &str, char_name: &str, user_name: &str, forbid_media: bool) -> Vec<AnyView> {
     let substituted = substitute_macros(text, char_name, user_name);
     let stripped = crate::render::safe_html::strip_plot_momentum(&substituted);
+    let stripped = crate::render::safe_html::unwrap_format_tags(&stripped);
     let mut blocks: Vec<AnyView> = Vec::new();
     let body: &str = match extract_leading_time_header(&stripped) {
         Some((header, remainder)) => {
@@ -363,6 +364,23 @@ mod tests {
     #[test]
     fn does_not_treat_a_mid_message_bracket_span_as_a_header() {
         assert!(extract_leading_time_header("She said `[laughs]` and left.").is_none());
+    }
+
+    #[test]
+    fn format_status_card_is_text_not_dropped_html() {
+        let raw = "<format>\n```\nName: Felix\nAge: 20\n```\n</format>";
+        let unwrapped = crate::render::safe_html::unwrap_format_tags(raw);
+        let mut saw_name = false;
+        let mut saw_html = false;
+        for event in Parser::new(&unwrapped) {
+            match event {
+                Event::Text(text) if text.contains("Name: Felix") => saw_name = true,
+                Event::Html(_) | Event::InlineHtml(_) => saw_html = true,
+                _ => {}
+            }
+        }
+        assert!(saw_name, "status card was not parsed as text");
+        assert!(!saw_html, "status card was still treated as raw html");
     }
 }
 

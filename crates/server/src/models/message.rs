@@ -128,6 +128,15 @@ pub async fn tree_for_chat(pool: &sqlx::SqlitePool, user_id: i64, chat_id: &str)
     })
 }
 
+/// the history view only needs the text the user reads. `raw_prompt` is the
+/// full provider payload for every reply, and sending all of them makes the
+/// reload too big to come back promptly.
+pub fn strip_raw_prompts(tree: &mut MessageTree) {
+    for node in tree.messages.values_mut() {
+        node.raw_prompt = None;
+    }
+}
+
 pub async fn active_branch_for_chat(pool: &sqlx::SqlitePool, user_id: i64, chat_id: &str, limit: Option<i64>) -> sqlx::Result<Vec<Message>> {
     let limit_val = limit.unwrap_or(100);
     sqlx::query_as::<_, Message>(
@@ -397,4 +406,44 @@ pub async fn tree_from_message(
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_raw_prompts_keeps_the_visible_message() {
+        let mut tree = MessageTree {
+            user_id: 1,
+            root_id: Some("a".into()),
+            messages: HashMap::new(),
+            character: None,
+            group: None,
+            user_name: None,
+        };
+        tree.messages.insert(
+            "a".into(),
+            MessageNode {
+                user_id: 1,
+                id: "a".into(),
+                parent_id: None,
+                role: "assistant".into(),
+                content: "hi".into(),
+                visible: true,
+                deleted: false,
+                created_at: 0,
+                children: Vec::new(),
+                raw_prompt: Some("[{\"role\":\"system\"}]".into()),
+                prompt_tokens: Some(12),
+                context_limit: Some(8000),
+                character_id: None,
+            },
+        );
+        strip_raw_prompts(&mut tree);
+        let node = &tree.messages["a"];
+        assert!(node.raw_prompt.is_none());
+        assert_eq!(node.prompt_tokens, Some(12));
+        assert_eq!(node.content, "hi");
+    }
 }

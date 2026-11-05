@@ -66,6 +66,30 @@ pub async fn get_chat(id: &str) -> Result<Chat, String> {
         .map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize, Clone)]
+pub struct RecentChat {
+    pub id: String,
+    pub title: String,
+    pub updated_at: i64,
+    pub character_id: Option<String>,
+    pub group_id: Option<String>,
+    pub character_name: Option<String>,
+    pub character_avatar: Option<String>,
+    pub group_name: Option<String>,
+    pub group_avatar: Option<String>,
+}
+
+pub async fn list_recent_chats() -> Result<Vec<RecentChat>, String> {
+    Request::get("/api/chats/recent?limit=8")
+        .credentials(web_sys::RequestCredentials::Include)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 pub async fn list_chats(character_id: &str) -> Result<Vec<Chat>, String> {
     Request::get(&format!("/api/characters/{character_id}/chats"))
         .credentials(web_sys::RequestCredentials::Include)
@@ -118,7 +142,22 @@ pub async fn remove_chat_member(chat_id: &str, character_id: &str) -> Result<Cha
 }
 
 pub async fn list_messages(chat_id: &str) -> Result<MessageTree, String> {
-    Request::get(&format!("/api/chats/{chat_id}/messages"))
+    // brief leaves out each reply's stored provider payload. that payload is
+    // what made this reload take seconds, during which the just-finished
+    // messages had already been taken off the screen.
+    let response = Request::get(&format!("/api/chats/{chat_id}/messages?brief=true"))
+        .credentials(web_sys::RequestCredentials::Include)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.ok() {
+        return Err(format!("messages {}", response.status()));
+    }
+    response.json().await.map_err(|e| e.to_string())
+}
+
+pub async fn active_branch(chat_id: &str) -> Result<Vec<MessageNode>, String> {
+    Request::get(&format!("/api/chats/{chat_id}/active_branch?brief=true"))
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await
@@ -128,15 +167,23 @@ pub async fn list_messages(chat_id: &str) -> Result<MessageTree, String> {
         .map_err(|e| e.to_string())
 }
 
-pub async fn active_branch(chat_id: &str) -> Result<Vec<MessageNode>, String> {
-    Request::get(&format!("/api/chats/{chat_id}/active_branch"))
+#[derive(Deserialize)]
+pub struct MessagePrompt {
+    pub raw_prompt: Option<String>,
+    pub prompt_tokens: Option<i64>,
+    pub context_limit: Option<i64>,
+}
+
+pub async fn get_message_prompt(id: &str) -> Result<MessagePrompt, String> {
+    let response = Request::get(&format!("/api/messages/{id}/prompt"))
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if !response.ok() {
+        return Err(response.text().await.unwrap_or_default());
+    }
+    response.json().await.map_err(|e| e.to_string())
 }
 
 pub async fn subtree(
@@ -185,7 +232,7 @@ pub async fn edit_message(id: &str, content: &str) -> Result<(), String> {
     let window = web_sys::window().ok_or("no window")?;
     let response_value = JsFuture::from(window.fetch_with_request(&request))
         .await
-        .map_err(|e| format!("{e:?}"))?;
+        .map_err(|e| super::core::brief_net_error(format!("{e:?}")))?;
     let response: web_sys::Response = response_value.dyn_into().map_err(|e| format!("{e:?}"))?;
     if response.ok() { Ok(()) } else { Err("failed to edit message".to_string()) }
 }
@@ -212,7 +259,7 @@ pub async fn set_message_visibility(id: &str, visible: bool) -> Result<(), Strin
     let window = web_sys::window().ok_or("no window")?;
     let response_value = JsFuture::from(window.fetch_with_request(&request))
         .await
-        .map_err(|e| format!("{e:?}"))?;
+        .map_err(|e| super::core::brief_net_error(format!("{e:?}")))?;
     let response: web_sys::Response = response_value.dyn_into().map_err(|e| format!("{e:?}"))?;
     if response.ok() { Ok(()) } else { Err("failed to toggle visibility".to_string()) }
 }

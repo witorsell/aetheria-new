@@ -84,12 +84,7 @@ pub fn CharactersPage() -> impl IntoView {
     view! {
         <div class="library-layout">
             <div class="library-pane">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
-                    <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; color: var(--color-text-muted); letter-spacing: -0.02em; margin: 0;">"Library."</h1>
-                    <form method="POST" action="/api/logout">
-                        <button type="submit" class="btn" style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text-muted);">"Logout"</button>
-                    </form>
-                </div>
+                <h1 class="page-title">"Library"</h1>
                 <div style="margin-bottom: 1rem;">
                     <input
                         type="text"

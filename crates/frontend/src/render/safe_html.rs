@@ -408,8 +408,12 @@ pub fn strip_plot_momentum(text: &str) -> String {
                 pos = end;
             }
             None => {
-                out.push_str(&text[start..]);
-                pos = text.len();
+                // still streaming. once the summary says plot momentum, the
+                // rest of this reply is notes. leaving it in the text holds
+                // the cursor on the last real paragraph for the whole block.
+                if !is_plot_momentum_summary(&lower[start..]) {
+                    out.push_str(&text[start..]);
+                }
                 break;
             }
         }
@@ -417,9 +421,53 @@ pub fn strip_plot_momentum(text: &str) -> String {
     out
 }
 
+/// `<format>` wraps the status card the model is supposed to show. A line
+/// that is only `<format>` starts an HTML block in CommonMark, and the
+/// markdown renderer drops raw HTML, so the card vanishes. Peel the tags
+/// off and leave the card as ordinary markdown.
+pub fn unwrap_format_tags(text: &str) -> String {
+    let lower = text.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < text.len() {
+        if let Some(end) = match_format_tag(&lower, i) {
+            i = end;
+            continue;
+        }
+        let ch = text[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn match_format_tag(lower: &str, start: usize) -> Option<usize> {
+    let rest = &lower[start..];
+    if !rest.starts_with('<') {
+        return None;
+    }
+    let mut i = 1;
+    if rest[i..].starts_with('/') {
+        i += 1;
+    }
+    if !rest[i..].starts_with("format") {
+        return None;
+    }
+    i += "format".len();
+    let next = rest[i..].chars().next()?;
+    if next.is_ascii_alphanumeric() {
+        return None;
+    }
+    let gt = rest[i..].find('>')?;
+    if rest[i..i + gt].contains('\n') {
+        return None;
+    }
+    Some(start + i + gt + 1)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_style, sanitize_url, strip_plot_momentum};
+    use super::{sanitize_style, sanitize_url, strip_plot_momentum, unwrap_format_tags};
 
     #[test]
     fn sanitize_url_keeps_http_and_https() {
@@ -472,5 +520,47 @@ mod tests {
         let text = "<details><summary>Spoiler</summary>plot twist here</details>";
         let out = strip_plot_momentum(text);
         assert_eq!(out, text);
+    }
+
+    #[test]
+    fn drops_an_unclosed_plot_momentum_block_while_it_is_still_streaming() {
+        let text = "He walks off.\n\n<details><summary>Plot Momentum</summary>\nNext beat: the orb cracks.";
+        let out = strip_plot_momentum(text);
+        assert_eq!(out, "He walks off.\n\n");
+        assert!(!out.to_lowercase().contains("next beat"));
+    }
+
+    #[test]
+    fn keeps_an_unclosed_details_block_that_is_not_plot_momentum() {
+        let text = "Note.\n\n<details><summary>Inventory</summary>\norb";
+        assert_eq!(strip_plot_momentum(text), text);
+    }
+
+    #[test]
+    fn a_closed_plot_block_does_not_eat_the_status_card() {
+        let text = "Done.\n\n<details><summary>Plot Momentum</summary>\nsecret\n</details>\n\n<format>\nName: Felix\n</format>";
+        let out = strip_plot_momentum(text);
+        assert!(out.contains("Name: Felix"));
+        assert!(out.contains("<format>"));
+        assert!(!out.to_lowercase().contains("secret"));
+    }
+
+    #[test]
+    fn unwraps_format_tags_and_keeps_the_status_card() {
+        let text = "He walks away.\n\n<format>\n```\nName: Felix\nAge: 20\n```\n</format>\n";
+        let out = unwrap_format_tags(text);
+        assert_eq!(out, "He walks away.\n\n\n```\nName: Felix\nAge: 20\n```\n\n");
+    }
+
+    #[test]
+    fn unwraps_format_tags_with_attributes() {
+        let text = "<format class=\"sheet\">Name: Felix</format>";
+        assert_eq!(unwrap_format_tags(text), "Name: Felix");
+    }
+
+    #[test]
+    fn does_not_unwrap_lookalike_tags() {
+        let text = "<formatted>keep</formatted> <font color=\"#fff\">hi</font>";
+        assert_eq!(unwrap_format_tags(text), text);
     }
 }

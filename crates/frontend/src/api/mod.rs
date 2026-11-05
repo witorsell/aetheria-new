@@ -1,4 +1,5 @@
 mod account;
+mod card_bytes;
 mod characters;
 mod chats;
 mod core;

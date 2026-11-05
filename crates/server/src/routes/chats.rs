@@ -6,7 +6,7 @@ use crate::error::ApiError;
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 const MAX_CHAT_TITLE: usize = 256;
@@ -55,6 +55,22 @@ pub async fn list_for_character(
     ))
 }
 
+#[derive(Deserialize)]
+pub struct RecentQuery {
+    pub limit: Option<i64>,
+}
+
+pub async fn list_recent(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    Query(query): Query<RecentQuery>,
+) -> Result<Json<Vec<crate::models::chat::RecentChat>>, ApiError> {
+    let limit = query.limit.unwrap_or(8).clamp(1, 40);
+    Ok(Json(
+        crate::models::chat::list_recent(&state.db.read_pool, user_id, limit).await?,
+    ))
+}
+
 pub async fn create(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
@@ -95,27 +111,50 @@ pub async fn create(
 pub struct ListMessagesParams {
     pub before: Option<String>,
     pub limit: Option<i64>,
+    /// drop each message's stored provider payload. the chat view reloads
+    /// this after every reply, and those payloads are what make the body
+    /// take seconds to arrive.
+    pub brief: Option<bool>,
 }
 
 pub async fn get_tree(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
-    Query(_params): Query<ListMessagesParams>,
+    Query(params): Query<ListMessagesParams>,
 ) -> Result<Json<MessageTree>, ApiError> {
-    Ok(Json(
-        crate::models::message::tree_for_chat(&state.db.read_pool, user_id, &chat_id).await?,
-    ))
+    let mut tree =
+        crate::models::message::tree_for_chat(&state.db.read_pool, user_id, &chat_id).await?;
+    if params.brief.unwrap_or(false) {
+        crate::models::message::strip_raw_prompts(&mut tree);
+    }
+    Ok(Json(tree))
+}
+
+#[derive(Deserialize)]
+pub struct BranchParams {
+    pub brief: Option<bool>,
 }
 
 pub async fn get_active_branch(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
+    Query(params): Query<BranchParams>,
 ) -> Result<Json<Vec<crate::models::message::Message>>, ApiError> {
-    Ok(Json(
-        crate::models::message::active_branch_for_chat(&state.db.read_pool, user_id, &chat_id, Some(200)).await?,
-    ))
+    let mut messages = crate::models::message::active_branch_for_chat(
+        &state.db.read_pool,
+        user_id,
+        &chat_id,
+        Some(200),
+    )
+    .await?;
+    if params.brief.unwrap_or(false) {
+        for message in &mut messages {
+            message.raw_prompt = None;
+        }
+    }
+    Ok(Json(messages))
 }
 
 #[derive(Deserialize)]
@@ -168,6 +207,39 @@ pub async fn edit_message(
 #[derive(Deserialize)]
 pub struct VisibilityInput {
     pub visible: bool,
+}
+
+#[derive(Serialize)]
+pub struct MessagePrompt {
+    pub raw_prompt: Option<String>,
+    pub prompt_tokens: Option<i64>,
+    pub context_limit: Option<i64>,
+}
+
+/// one message's stored provider payload, loaded only when the prompt panel
+/// is opened. the history reload leaves this out.
+pub async fn get_message_prompt(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<MessagePrompt>, ApiError> {
+    let msg = sqlx::query_as::<_, crate::models::message::Message>(
+        "SELECT * FROM messages WHERE id = ? AND user_id = ?",
+    )
+    .bind(&id)
+    .bind(user_id)
+    .fetch_optional(&state.db.read_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "failed to load message prompt");
+        ApiError::internal("Failed to load message")
+    })?;
+    let msg = msg.ok_or_else(|| ApiError::not_found("Message not found"))?;
+    Ok(Json(MessagePrompt {
+        raw_prompt: msg.raw_prompt,
+        prompt_tokens: msg.prompt_tokens,
+        context_limit: msg.context_limit,
+    }))
 }
 
 pub async fn set_message_visibility(

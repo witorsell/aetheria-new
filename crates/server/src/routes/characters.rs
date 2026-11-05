@@ -4,8 +4,9 @@ use crate::models::character::{
 };
 use crate::state::AppState;
 use axum::extract::{Extension, Multipart, Path, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
-use axum::http::StatusCode;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -122,19 +123,27 @@ pub async fn get_character(
 pub async fn create(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(input): Json<CharacterInput>,
-) -> Result<Json<Character>, ApiError> {
+) -> Result<Response, ApiError> {
     validate_character_input(&input)?;
-    state
+    let created = state
         .db
         .writer
         .create_character(user_id, input)
         .await
-        .map(Json)
         .map_err(|e| {
             tracing::error!(error = %e, "failed to create character");
             ApiError::internal("Failed to create character")
-        })
+        })?;
+    // importing a card posts the full text and only needs the new id back.
+    // echoing the character is larger than the link in front of the server
+    // will deliver, and the client reports a failed fetch.
+    if headers.get("x-response-brief").is_some() {
+        Ok(Json(serde_json::json!({ "id": created.id })).into_response())
+    } else {
+        Ok(Json(created).into_response())
+    }
 }
 
 pub async fn update(

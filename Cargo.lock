@@ -1419,6 +1419,8 @@ dependencies = [
 name = "frontend"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.0",
+ "flate2",
  "gloo-net 0.7.0",
  "gloo-timers",
  "html-escape",

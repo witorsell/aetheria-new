@@ -101,6 +101,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/import/lorebook", post(import_export::import_lorebook))
         .route("/api/export/lorebook/{id}", get(import_export::export_lorebook))
         // chat / messages / generation
+        .route("/api/chats/recent", get(chats::list_recent))
         .route("/api/chats/{id}", get(chats::get_chat))
         .route("/api/chats/{id}/messages", get(chats::get_tree))
         .route("/api/chats/{id}/active_branch", get(chats::get_active_branch))
@@ -110,6 +111,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/chats/{id}/regenerate", post(generate::regenerate))
         .route("/api/chats/{id}/continue", post(generate::continue_generation))
         .route("/api/chats/{id}/respond-as-user", post(generate::respond_as_user))
+        .route("/api/messages/{id}/prompt", get(chats::get_message_prompt))
         .route(
             "/api/messages/{id}",
             delete(chats::delete_message).patch(chats::edit_message),

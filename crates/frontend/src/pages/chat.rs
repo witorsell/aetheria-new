@@ -14,7 +14,21 @@ use super::chat_actions::{
 use super::chat_data::build_fetch_tree;
 use super::chat_generation::{build_continue_gen, build_regenerate, build_respond_as_me, build_send};
 use super::chat_helpers::{Thought, RawPromptPanel, walk_active_branch, speaker_for};
-use super::chat_state::{ChatSignals, GenState};
+use super::chat_state::{install_tail_follow_break, maintain_tail_follow, ChatSignals, GenState};
+
+/// Tap a message to reveal its tools. Buttons inside the row keep the click.
+fn focus_message_row(ev: web_sys::MouseEvent) {
+    use wasm_bindgen::JsCast;
+    let Some(target) = ev.target() else { return };
+    let Ok(target) = target.dyn_into::<web_sys::Element>() else { return };
+    if target.closest("button, a, textarea, input, label").ok().flatten().is_some() {
+        return;
+    }
+    let Some(current) = ev.current_target() else { return };
+    if let Ok(el) = current.dyn_into::<web_sys::HtmlElement>() {
+        let _ = el.focus();
+    }
+}
 
 #[component]
 pub fn ChatPage() -> impl IntoView {
@@ -36,13 +50,6 @@ pub fn ChatPage() -> impl IntoView {
             .collect::<HashMap<String, crate::api::Character>>()
     });
     
-    let fetch_tree = build_fetch_tree(chat_id, set_chat_meta, set_tree);
-    
-    Effect::new({
-        let fetch = fetch_tree.clone();
-        move |_| fetch()
-    });
-
     let char_name_sig = Signal::derive(move || {
         if let Some(g) = tree.get().group {
             g.group.name
@@ -175,6 +182,7 @@ pub fn ChatPage() -> impl IntoView {
     // stream started in chat A keep writing into whatever chat is on
     // screen when its deltas arrive. see chat_state::GenState.
     let gen_states = RwSignal::new(HashMap::<String, GenState>::new());
+    let outbox = RwSignal::new(HashMap::<String, Vec<String>>::new());
     let gen_for_current = Memo::new(move |_| {
         gen_states.with(|m| m.get(&chat_id.get()).cloned().unwrap_or_default())
     });
@@ -222,15 +230,44 @@ pub fn ChatPage() -> impl IntoView {
 
     let extracted_stream = Memo::new(move |_| {
         let full = streaming_reply.get();
-        let len = revealed_len.get();
-        let prefix: String = if crate::api::get_text_speed() == 0 {
+        // once the bytes have stopped, show the whole reply. the typewriter
+        // used to still be a few characters behind, and that tail only
+        // appeared when the saved message replaced the stream.
+        let prefix: String = if !is_generating.get() || crate::api::get_text_speed() == 0 {
             full
         } else {
-            full.chars().take(len).collect()
+            full.chars().take(revealed_len.get()).collect()
         };
-        crate::render::reasoning::extract_thinking(&prefix)
+        let (body, thought) = crate::render::reasoning::extract_thinking(&prefix);
+        // plot momentum notes are not part of the reply. strip them here so
+        // a still-open block does not count as the visible text moving.
+        let body = crate::render::safe_html::strip_plot_momentum(&body);
+        (body, thought)
     });
     let has_thought = Memo::new(move |_| extracted_stream.get().1.is_some());
+
+    // the cursor tracks visible text. a plot-momentum block keeps tokens
+    // coming for several seconds without changing what is on screen, and
+    // the bar used to sit under the last paragraph the whole time.
+    let (show_cursor, set_show_cursor) = signal(false);
+    let cursor_epoch = Rc::new(Cell::new(0u64));
+    Effect::new(move |_| {
+        let _visible = extracted_stream.get().0;
+        if !is_generating.get() {
+            set_show_cursor.set(false);
+            return;
+        }
+        set_show_cursor.set(true);
+        let epoch = cursor_epoch.get() + 1;
+        cursor_epoch.set(epoch);
+        let epochs = cursor_epoch.clone();
+        leptos::task::spawn_local(async move {
+            gloo_timers::future::TimeoutFuture::new(600).await;
+            if epochs.get() == epoch {
+                set_show_cursor.set(false);
+            }
+        });
+    });
 
     let generation_epoch = Rc::new(Cell::new(0u64));
 
@@ -246,8 +283,11 @@ pub fn ChatPage() -> impl IntoView {
         if speed == 0 {
             return;
         }
-        let interval_ms = 1000 / speed;
+        // a full markdown rebuild every 12ms pegs the phone and the stream
+        // read stops getting turns, so the end of the reply sits there.
+        let interval_ms = (1000 / speed).max(80);
         let epoch_for_loop = generation_epoch.clone();
+        let idle_pulls = Rc::new(Cell::new(0u32));
 
         leptos::task::spawn_local(async move {
             loop {
@@ -258,24 +298,50 @@ pub fn ChatPage() -> impl IntoView {
                 let total = streaming_reply.get_untracked().chars().count();
                 let current = revealed_len.get_untracked();
                 if current >= total {
+                    // caught up. only spend a scroll if a layout clamp
+                    // actually left them on the opening exchange. idling
+                    // at the bottom shouldn't schedule a pin every tick
+                    // for the whole reload.
+                    let id_now = chat_id.get_untracked();
+                    let follow = gen_states.with_untracked(|m| m.get(&id_now).is_some_and(|s| s.follow_tail));
+                    if follow && crate::pages::chat_state::is_scroll_at_top() && !crate::pages::chat_state::is_scrolled_to_bottom() {
+                        let n = idle_pulls.get();
+                        idle_pulls.set(n.wrapping_add(1));
+                        if n % 4 == 0 {
+                            crate::pages::chat_state::scroll_to_bottom_soon();
+                        }
+                    } else if follow && !crate::pages::chat_state::is_scrolled_to_bottom() && !crate::pages::chat_state::is_scroll_at_top() {
+                        gen_states.update(|m| {
+                            if let Some(state) = m.get_mut(&id_now) {
+                                state.follow_tail = false;
+                            }
+                        });
+                    }
                     continue;
                 }
                 let behind = total - current;
-                let step = if behind > 40 { (behind / 20).max(1) } else { 1 };
+                let step = super::chat_state::reveal_step(behind, speed);
                 set_revealed_len.set((current + step).min(total));
+                maintain_tail_follow(gen_states, &chat_id.get_untracked());
             }
         });
+    });
+
+    Effect::new(move |_| {
+        install_tail_follow_break(gen_states, chat_id);
     });
 
     let signals = ChatSignals {
         chat_id,
         tree,
         set_tree,
+        set_chat_meta,
         active_branch,
         draft,
         set_draft,
         set_pending_user_text,
         gen_states,
+        outbox,
         set_more_menu_open,
         set_error,
         send_parent_id,
@@ -285,10 +351,20 @@ pub fn ChatPage() -> impl IntoView {
         set_selected_children,
     };
 
-    let send = build_send(signals, fetch_tree, navigate.clone());
-    let regenerate = build_regenerate(signals, fetch_tree, navigate.clone());
-    let continue_gen = build_continue_gen(signals, fetch_tree, navigate.clone());
-    let respond_as_me = build_respond_as_me(signals, fetch_tree, navigate.clone());
+    let fetch_tree = build_fetch_tree(signals);
+    Effect::new({
+        let fetch = fetch_tree.clone();
+        move |_| fetch()
+    });
+
+    let send = build_send(signals, navigate.clone());
+    let queued_lines = Memo::new(move |_| {
+        let id = chat_id.get();
+        outbox.with(|m| m.get(&id).cloned().unwrap_or_default())
+    });
+    let regenerate = build_regenerate(signals, navigate.clone());
+    let continue_gen = build_continue_gen(signals, navigate.clone());
+    let respond_as_me = build_respond_as_me(signals, navigate.clone());
 
     let delete = build_delete(signals, fetch_tree);
     let delete_all_below = build_delete_all_below(signals, fetch_tree);
@@ -342,9 +418,9 @@ pub fn ChatPage() -> impl IntoView {
     view! {
         <div class="chat-page">
 
-        <div class="chat-header" style="position: sticky; top: -2rem; z-index: 100; background: var(--color-bg); display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; margin-top: -2rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border);">
+        <div class="chat-header">
                 <strong>{move || char_name_sig.get()}</strong>
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div class="chat-header-tools">
                     // mounted once behind Show rather than rebuilt from chat_meta.get().map(...)
                     // on every render. chat_meta flips from None to Some exactly once per page
                     // load and then just updates in place, so ChatMembers keeps its own
@@ -381,26 +457,46 @@ pub fn ChatPage() -> impl IntoView {
                     let fallback_character = tree.get_untracked().character.clone();
                     let is_group_chat = tree.get_untracked().group.is_some();
 
-                    branch
+                    let visible_msgs: Vec<_> = branch.into_iter().filter(|n| !n.deleted).collect();
+                    let speaker_keys: Vec<String> = visible_msgs.iter().map(|m| {
+                        if m.role == "user" {
+                            "user".to_string()
+                        } else {
+                            m.character_id.clone().unwrap_or_default()
+                        }
+                    }).collect();
+                    let last_idx = visible_msgs.len().saturating_sub(1);
+                    // the optimistic tail is the end of the conversation until the saved
+                    // rows replace it, so the message behind that tail is not "latest"
+                    // untracked on purpose. reading these here rebuilt every
+                    // row when a reply started or finished, and the phone
+                    // clamped the scroller back to the opening exchange.
+                    let tail_open = regenerating_msg_id.get_untracked().is_none()
+                        && (is_generating.get_untracked()
+                            || pending_user_text.get_untracked().is_some()
+                            || !group_reply_log.get_untracked().is_empty());
+                    visible_msgs
                         .into_iter()
-                        .filter(|n| !n.deleted)
-                        .map(move |message| {
+                        .enumerate()
+                        .map(move |(idx, message)| {
+                            let grouped = idx > 0 && speaker_keys.get(idx) == speaker_keys.get(idx - 1);
+                            let rhythm = if grouped { "grouped" } else { "turn-start" };
+                            let latest = if idx == last_idx && !tail_open { "is-latest" } else { "" };
                             let id = message.id.clone();
                             let role = message.role.clone();
-                            let content = if is_generating.get() && regenerating_msg_id.get() == Some(id.clone()) {
-                                streaming_reply.get()
-                            } else {
-                                message.content.clone()
-                            };
+                            // saved text only. reading streaming_reply here
+                            // subscribed the whole list, so every regenerate
+                            // token destroyed every row and the scroller
+                            // clamped back to the first exchange.
+                            let content = message.content.clone();
                             let visible = message.visible;
                             let raw_prompt = message.raw_prompt.clone();
+                            let has_stored_prompt = message.prompt_tokens.is_some() || raw_prompt.is_some();
                             let (speaker_name, speaker_avatar) =
                                 speaker_for(&char_map, &fallback_character, &message.character_id);
 
-                            let (visible_body, thought) =
+                            let (_, thought) =
                                 crate::render::reasoning::extract_thinking(&content);
-                            let rendered =
-                                crate::render::markdown::render_markdown(&visible_body, &speaker_name, &user_name_sig.get(), forbid_media());
 
                             let is_selected_branch_point = send_pid.as_ref() == Some(&id);
                             let is_editing = editing.as_ref() == Some(&id);
@@ -427,11 +523,16 @@ pub fn ChatPage() -> impl IntoView {
                             });
 
                             view! {
-                                <li class=format!(
-                                    "message-row {} {} {}",
+                                <li
+                                    tabindex="-1"
+                                    on:click=focus_message_row
+                                    class=format!(
+                                    "message-row {} {} {} {} {}",
                                     role,
                                     if !visible { "dimmed" } else { "" },
                                     if is_selected_branch_point { "branch-selected" } else { "" },
+                                    rhythm,
+                                    latest,
                                 )>
                                     {
                                         let label_role = role.clone();
@@ -526,11 +627,30 @@ pub fn ChatPage() -> impl IntoView {
                                             }.into_any()
                                         } else {
                                             let thought_id = id.clone();
+                                            let row_id = id.clone();
+                                            let saved = content.clone();
+                                            let speaker = speaker_name.clone();
                                             let tos = thought_open_states;
                                             let stos = set_thought_open_states;
+                                            // the stream subscription lives on this row only.
+                                            // the list builder must not read streaming_reply,
+                                            // or every token remounts the whole transcript.
                                             view! {
-                                                {thought.map(|t| view! { <Thought text=t message_id=thought_id.clone() open_states=tos set_open_states=stos forbid_media=forbid_media() /> })}
-                                                <div>{rendered}</div>
+                                                {move || {
+                                                    // is_generating drops when the bytes end, before
+                                                    // the saved swipe is in the tree. this row has to
+                                                    // keep the streamed text or it flashes the old reply.
+                                                    let regen_here = regenerating_msg_id.get().as_deref() == Some(row_id.as_str());
+                                                    let streamed = if regen_here { streaming_reply.get() } else { String::new() };
+                                                    let live = regen_here && (is_generating.get() || !streamed.is_empty());
+                                                    let content = if live { streamed } else { saved.clone() };
+                                                    let (visible_body, thought) = crate::render::reasoning::extract_thinking(&content);
+                                                    let rendered = crate::render::markdown::render_markdown(&visible_body, &speaker, &user_name_sig.get(), forbid_media());
+                                                    view! {
+                                                        {thought.map(|t| view! { <Thought text=t message_id=thought_id.clone() open_states=tos set_open_states=stos forbid_media=forbid_media() /> })}
+                                                        <div>{rendered}</div>
+                                                    }
+                                                }}
                                             }.into_any()
                                         }}
                                     </div>
@@ -750,19 +870,46 @@ pub fn ChatPage() -> impl IntoView {
                                                     <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
                                                 </svg>
                                             </button>
-                                            {raw_prompt.clone().map(|_| {
+                                            {has_stored_prompt.then(|| {
                                                 let id_for_toggle = id.clone();
+                                                let already_loaded = raw_prompt.is_some();
                                                 view! {
                                                     <button
                                                         class="icon-btn view-prompt"
                                                         title="View the raw prompt sent for this message"
                                                         on:click=move |_| {
-                                                            set_open_prompt_id.update(|current| {
-                                                                *current = if current.as_deref() == Some(id_for_toggle.as_str()) {
-                                                                    None
-                                                                } else {
-                                                                    Some(id_for_toggle.clone())
-                                                                };
+                                                            let toggle = {
+                                                                let id_for_toggle = id_for_toggle.clone();
+                                                                move || {
+                                                                    set_open_prompt_id.update(|current| {
+                                                                        *current = if current.as_deref() == Some(id_for_toggle.as_str()) {
+                                                                            None
+                                                                        } else {
+                                                                            Some(id_for_toggle.clone())
+                                                                        };
+                                                                    });
+                                                                }
+                                                            };
+                                                            if already_loaded {
+                                                                toggle();
+                                                                return;
+                                                            }
+                                                            let id_for_load = id_for_toggle.clone();
+                                                            spawn_local(async move {
+                                                                if let Ok(prompt) = crate::api::get_message_prompt(&id_for_load).await {
+                                                                    set_tree.update(|t| {
+                                                                        if let Some(node) = t.messages.get_mut(&id_for_load) {
+                                                                            node.raw_prompt = prompt.raw_prompt;
+                                                                            if prompt.prompt_tokens.is_some() {
+                                                                                node.prompt_tokens = prompt.prompt_tokens;
+                                                                            }
+                                                                            if prompt.context_limit.is_some() {
+                                                                                node.context_limit = prompt.context_limit;
+                                                                            }
+                                                                        }
+                                                                    });
+                                                                    set_open_prompt_id.set(Some(id_for_load));
+                                                                }
                                                             });
                                                         }
                                                     >
@@ -790,7 +937,7 @@ pub fn ChatPage() -> impl IntoView {
                                             </button>
                                             {
                                                 let is_last = Some(id.clone()) == last_id;
-                                                let is_gen = is_generating.get();
+                                                let is_gen = is_generating.get_untracked();
                                                 let regen = regenerate_inner.clone();
                                                 if is_last {
                                                     view! {
@@ -817,11 +964,20 @@ pub fn ChatPage() -> impl IntoView {
                         })
                         .collect_view()
                 }}
-                <Show when=move || is_generating.get() && regenerating_msg_id.get().is_none()>
+                <Show when=move || {
+                    let live = gen_for_current.get();
+                    regenerating_msg_id.get().is_none()
+                        && (live.is_generating
+                            || pending_user_text.get().is_some()
+                            || !live.streaming_reply.is_empty()
+                            || !live.group_reply_log.is_empty())
+                }>
                     {move || {
                         pending_user_text.get().map(|text| {
+                            let follows_user = active_branch.get().iter().rev().find(|n| !n.deleted).is_some_and(|n| n.role == "user");
+                            let rhythm = if follows_user { "grouped" } else { "turn-start" };
                             view! {
-                                <li class="message-row user">
+                                <li class=format!("message-row user {rhythm}")>
                                     {move || {
                                         user_avatar_url.get().filter(|url| !url.is_empty() && !forbid_media()).map(|url| {
                                             view! {
@@ -846,7 +1002,11 @@ pub fn ChatPage() -> impl IntoView {
                             return ().into_any();
                         }
                         let char_map = character_by_id.get();
-                        group_reply_log.get().into_iter().map(|(character_id, name, content)| {
+                        let log = group_reply_log.get();
+                        (0..log.len()).map(|i| {
+                            let (character_id, name, content) = log[i].clone();
+                            let grouped = i > 0 && log[i].0 == log[i - 1].0;
+                            let rhythm = if grouped { "grouped" } else { "turn-start" };
                             let (_, avatar) = speaker_for(&char_map, &None, &Some(character_id));
                             let (visible_body, thought) = crate::render::reasoning::extract_thinking(&content);
                             let rendered = crate::render::markdown::render_markdown(&visible_body, &name, &user_name_sig.get(), forbid_media());
@@ -854,7 +1014,7 @@ pub fn ChatPage() -> impl IntoView {
                             let tos = thought_open_states;
                             let stos = set_thought_open_states;
                             view! {
-                                <li class="message-row assistant">
+                                <li class=format!("message-row assistant {rhythm}")>
                                     {avatar.filter(|url| !url.is_empty() && !forbid_media()).map(|url| view! {
                                         <div class="message-avatar-rect"><img src=url alt="avatar" /></div>
                                     })}
@@ -869,7 +1029,34 @@ pub fn ChatPage() -> impl IntoView {
                             }
                         }).collect::<Vec<_>>().into_any()
                     }}
-                    <li class=move || if is_self_reply.get() { "message-row user" } else { "message-row assistant" }>
+                    <Show when=move || {
+                        let live = gen_for_current.get();
+                        live.is_generating || !live.streaming_reply.is_empty()
+                    }>
+                    <li class=move || {
+                        let self_reply = is_self_reply.get();
+                        let log = group_reply_log.get();
+                        let pending = pending_user_text.get().is_some();
+                        let grouped = if let Some((cid, _, _)) = log.last() {
+                            !self_reply && current_member.get().is_some_and(|(id, _)| id == *cid)
+                        } else if self_reply {
+                            pending || active_branch.get().iter().rev().find(|n| !n.deleted).is_some_and(|n| n.role == "user")
+                        } else if pending {
+                            false
+                        } else {
+                            let member = current_member.get().map(|(id, _)| id);
+                            active_branch.get().iter().rev().find(|n| !n.deleted).is_some_and(|n| {
+                                n.role != "user" && match member.as_deref() {
+                                    Some(id) => n.character_id.as_deref() == Some(id),
+                                    // 1:1 has one assistant, so a continued reply stays in the same turn
+                                    None => tree.get().group.is_none(),
+                                }
+                            })
+                        };
+                        let role = if self_reply { "user" } else { "assistant" };
+                        let rhythm = if grouped { "grouped" } else { "turn-start" };
+                        format!("message-row {role} {rhythm}")
+                    }>
                         {move || {
                             if is_self_reply.get() {
                                 user_avatar_url.get().filter(|url| !url.is_empty() && !forbid_media()).map(|url| {
@@ -911,10 +1098,11 @@ pub fn ChatPage() -> impl IntoView {
                                         )
                                     }}
                                 </div>
-                                <span class="streaming-cursor">"|"</span>
+                                {move || (is_generating.get() && show_cursor.get()).then(|| view! { <span class="streaming-cursor">"|"</span> })}
                             </div>
                         </div>
                     </li>
+                    </Show>
                 </Show>
             </ul>
 
@@ -923,8 +1111,34 @@ pub fn ChatPage() -> impl IntoView {
             {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
 
             <form class="chat-input-bar" on:submit=send>
+                <div class="chat-compose-stack">
                 {move || {
-                    if is_generating.get() {
+                    let lines = queued_lines.get();
+                    if lines.is_empty() {
+                        ().into_any()
+                    } else {
+                        let rows = lines.into_iter().enumerate().map(move |(index, line)| {
+                            view! {
+                                <li class="chat-queue-item">
+                                    <span class="chat-queue-text">{line}</span>
+                                    <button
+                                        type="button"
+                                        class="chat-queue-remove"
+                                        title="Remove"
+                                        aria-label="Remove"
+                                        on:click=move |_| signals.remove_outbox_at(&chat_id.get_untracked(), index)
+                                    >
+                                        "×"
+                                    </button>
+                                </li>
+                            }
+                        }).collect_view();
+                        view! { <ul class="chat-queue">{rows}</ul> }.into_any()
+                    }
+                }}
+                <div class="chat-composer">
+                {move || {
+                    if gen_for_current.get().blocks_send() {
                         ().into_any()
                     } else {
                         let continue_gen = continue_gen.clone();
@@ -954,7 +1168,7 @@ pub fn ChatPage() -> impl IntoView {
                                                     class="more-menu-item"
                                                     on:click=continue_gen.clone()
                                                 >
-                                                    "▶ Continue generation"
+                                                    "Continue"
                                                 </button>
                                             }.into_any()
                                         } else {
@@ -981,8 +1195,15 @@ pub fn ChatPage() -> impl IntoView {
                 }}
 
                 <input
+                    class="chat-field"
                     type="text"
-                    placeholder="Type a message..."
+                    placeholder=Signal::derive(move || {
+                        if gen_for_current.get().blocks_send() {
+                            "Queue message"
+                        } else {
+                            "Message"
+                        }
+                    })
                     prop:value=draft
                     on:input=move |ev| set_draft.set(event_target_value(&ev))
                 />
@@ -994,12 +1215,26 @@ pub fn ChatPage() -> impl IntoView {
                     })
                     class="mascot-chat-corner"
                 />
-                <button class="primary send-btn" type="submit" title="Send" disabled=move || is_generating.get()>
+                <button
+                    class="primary send-btn"
+                    type="submit"
+                    title=Signal::derive(move || {
+                        if gen_for_current.get().blocks_send() { "Queue" } else { "Send" }
+                    })
+                    disabled=Signal::derive(move || {
+                        let draft_empty = draft.get().trim().is_empty();
+                        let busy = gen_for_current.get().blocks_send();
+                        let has_queue = !queued_lines.get().is_empty();
+                        draft_empty && (busy || !has_queue)
+                    })
+                >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="22" y1="2" x2="11" y2="13"></line>
                         <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                     </svg>
                 </button>
+                </div>
+                </div>
             </form>
 
             {move || {

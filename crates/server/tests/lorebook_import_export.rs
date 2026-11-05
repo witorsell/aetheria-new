@@ -166,3 +166,101 @@ async fn exporting_and_reimporting_a_lorebook_round_trips_its_entries() {
     assert_eq!(imported_entries[0]["selective_logic"], 2);
     assert_eq!(imported_entries[0]["exclude_recursion"], true);
 }
+
+#[tokio::test]
+async fn importing_a_sillytavern_world_info_object_keeps_its_entries() {
+    let (app, cookie) = common::authed_app().await;
+
+    // standalone SillyTavern world info: entries is an object keyed by uid,
+    // keywords live on `key`, order on `order`, and position is a number.
+    let world = serde_json::json!({
+        "name": "Alpha World Info",
+        "entries": {
+            "7": {
+                "uid": 7,
+                "key": ["phone", "microwave"],
+                "keysecondary": ["lab"],
+                "comment": "Phone Microwave",
+                "content": "The Phone Microwave sits on the bench.",
+                "constant": false,
+                "selective": true,
+                "selectiveLogic": 1,
+                "order": 100,
+                "position": 0,
+                "disable": false,
+                "excludeRecursion": true,
+                "probability": 80,
+                "useProbability": false
+            },
+            "2": {
+                "uid": 2,
+                "key": "okabe, hououin",
+                "comment": "",
+                "content": "Okabe Rintarou calls himself Hououin Kyouma.",
+                "order": 50,
+                "position": 1,
+                "disable": true
+            }
+        }
+    });
+    let (content_type, body) = multipart_body(
+        "file",
+        "world.json",
+        "application/json",
+        world.to_string().as_bytes(),
+    );
+    let import_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/import/lorebook")
+                .header(header::CONTENT_TYPE, content_type)
+                .header(header::COOKIE, cookie.clone())
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(import_response.status(), StatusCode::OK);
+    let import_bytes = axum::body::to_bytes(import_response.into_body(), usize::MAX).await.unwrap();
+    let imported: serde_json::Value = serde_json::from_slice(&import_bytes).unwrap();
+    let imported_id = imported["id"].as_str().unwrap();
+    assert_eq!(imported["name"], "Alpha World Info");
+
+    let entries_response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/lorebooks/{imported_id}/entries"))
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let entries_bytes = axum::body::to_bytes(entries_response.into_body(), usize::MAX).await.unwrap();
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(&entries_bytes).unwrap();
+    assert_eq!(entries.len(), 2);
+
+    let phone = entries.iter().find(|e| e["entry"] == "The Phone Microwave sits on the bench.").unwrap();
+    assert_eq!(phone["name"], "Phone Microwave");
+    assert_eq!(phone["keywords"], "[\"phone\",\"microwave\"]");
+    assert_eq!(phone["secondary_keys"], "[\"lab\"]");
+    assert_eq!(phone["priority"], 100);
+    assert_eq!(phone["enabled"], true);
+    assert_eq!(phone["position"], "before_char");
+    assert_eq!(phone["probability"], 80);
+    assert_eq!(phone["use_probability"], false);
+    assert_eq!(phone["selective"], true);
+    assert_eq!(phone["selective_logic"], 1);
+    assert_eq!(phone["exclude_recursion"], true);
+    assert_eq!(phone["constant"], false);
+
+    let okabe = entries.iter().find(|e| e["entry"] == "Okabe Rintarou calls himself Hououin Kyouma.").unwrap();
+    assert_eq!(okabe["keywords"], "[\"okabe\",\"hououin\"]");
+    assert_eq!(okabe["priority"], 50);
+    assert_eq!(okabe["enabled"], false);
+    assert_eq!(okabe["position"], "after_char");
+    assert_eq!(okabe["probability"], 100);
+    assert_eq!(okabe["use_probability"], true);
+}

@@ -1,6 +1,5 @@
 use leptos::prelude::*;
-use leptos_router::NavigateOptions;
-use leptos_router::hooks::use_navigate;
+use leptos_router::components::A;
 
 /// whether the mobile nav drawer is currently open. provided by `Sidebar`,
 /// read by the hamburger button, the backdrop, and any navigation link
@@ -12,30 +11,46 @@ use leptos_router::hooks::use_navigate;
 pub struct SidebarDrawer(pub RwSignal<bool>);
 
 #[component]
-pub fn Sidebar(children: Children) -> impl IntoView {
+fn NavLink(
+    href: &'static str,
+    #[prop(optional)] exact: bool,
+    children: Children,
+) -> impl IntoView {
+    let drawer = use_context::<SidebarDrawer>();
+    let close = move |_| {
+        if let Some(SidebarDrawer(open)) = drawer {
+            open.set(false);
+        }
+    };
+    view! {
+        <A href=href exact=exact attr:class="sidebar-nav-link" on:click=close>
+            {children()}
+        </A>
+    }
+}
 
+#[component]
+pub fn Sidebar(children: Children) -> impl IntoView {
     let drawer_open = RwSignal::new(false);
     provide_context(SidebarDrawer(drawer_open));
 
-    let navigate = use_navigate();
-    let go_to = {
-        let nav = navigate.clone();
-        move |path: &'static str| {
-            drawer_open.set(false);
-            nav(path, NavigateOptions::default());
-        }
-    };
+    let close_drawer = move |_| drawer_open.set(false);
 
     view! {
         <div class="app-shell">
             <div class="mobile-topbar">
                 <button
                     class="hamburger"
+                    aria-label="Menu"
                     on:click=move |_| drawer_open.update(|open| *open = !*open)
                 >
-                    "☰"
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <path d="M4 7h16"></path>
+                        <path d="M4 12h16"></path>
+                        <path d="M4 17h16"></path>
+                    </svg>
                 </button>
-                <span class="mobile-wordmark" style="cursor: pointer;" on:click={let go = go_to.clone(); move |_| go("/")}>"aetheria"</span>
+                <A href="/" attr:class="mobile-wordmark" on:click=close_drawer>"aetheria"</A>
             </div>
             <div
                 class="sidebar-backdrop"
@@ -43,15 +58,18 @@ pub fn Sidebar(children: Children) -> impl IntoView {
                 on:click=move |_| drawer_open.set(false)
             ></div>
             <aside class="sidebar" class:open=move || drawer_open.get()>
-                <div class="sidebar-wordmark" style="cursor: pointer;" on:click={let go = go_to.clone(); move |_| go("/")}>"aetheria."</div>
-                <div class="sidebar-nav" style="display: flex; flex-direction: column; gap: 1.25rem; margin-top: 1rem;">
-                    <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/")}>"Desk"</div>
-                    <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/characters")}>"Library"</div>
-                    <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/lorebooks")}>"Lorebooks"</div>
-                    <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/presets")}>"Presets"</div>
-                    <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/themes")}>"Themes"</div>
-                    <div class="sidebar-nav-link" on:click={let go = go_to.clone(); move |_| go("/settings")}>"System"</div>
-                </div>
+                <A href="/" attr:class="sidebar-wordmark" on:click=move |_| drawer_open.set(false)>"aetheria"</A>
+                <nav class="sidebar-nav">
+                    <NavLink href="/" exact=true>"Desk"</NavLink>
+                    <NavLink href="/characters">"Library"</NavLink>
+                    <NavLink href="/lorebooks">"Lorebooks"</NavLink>
+                    <NavLink href="/presets">"Presets"</NavLink>
+                    <NavLink href="/themes">"Themes"</NavLink>
+                    <NavLink href="/settings">"Settings"</NavLink>
+                </nav>
+                <form class="sidebar-foot" method="POST" action="/api/logout">
+                    <button type="submit" class="sidebar-logout">"Log out"</button>
+                </form>
             </aside>
             <main class="main-content">{children()}</main>
         </div>

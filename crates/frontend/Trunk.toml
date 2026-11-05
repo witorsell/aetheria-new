@@ -2,6 +2,19 @@
 target = "index.html"
 dist = "dist"
 
+# trunk preloads the wasm with a plain fetch, which would stall on the throttled network and
+# fight wasm-loader.js for the download, so drop that tag from the built page
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["-c", "sed -E -i.bak 's#<link rel=\"preload\"[^>]*as=\"fetch\"[^>]*>##' \"$TRUNK_STAGING_DIR/index.html\" && rm -f \"$TRUNK_STAGING_DIR/index.html.bak\""]
+
+# wasm-loader.js downloads this gzip copy, a third of the size, in small pieces
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["-c", "for f in \"$TRUNK_STAGING_DIR\"/*_bg.wasm; do gzip -9 -c \"$f\" > \"$f.gzip\"; done"]
+
 [[proxy]]
 backend = "http://127.0.0.1:4310/api"
 rewrite = "/api"

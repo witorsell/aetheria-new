@@ -168,21 +168,29 @@ pub async fn stream_post(
     let decoder = web_sys::TextDecoder::new().map_err(|e| format!("{e:?}"))?;
     let mut buffer = String::new();
 
+    // returns true once `event: done` has been seen. the caller stops reading
+    // there. the trailing EOF can take several seconds to show up on the phone,
+    // and the reply looks frozen for that whole wait.
     fn drain_events(
         buffer: &mut String,
         on_delta: &mut impl FnMut(String),
         on_member: &mut impl FnMut(String, String),
         on_error: &mut impl FnMut(String),
-    ) {
+    ) -> bool {
         while let Some(pos) = buffer.find("\n\n") {
             let event_block = buffer[..pos].to_string();
             buffer.drain(..pos + 2);
 
             let (kind, data) = parse_event_block(&event_block);
-            let Some(data) = data else { continue };
             match kind {
-                SseEventKind::Error => on_error(data),
+                SseEventKind::Done => return true,
+                SseEventKind::Error => {
+                    if let Some(data) = data {
+                        on_error(data);
+                    }
+                }
                 SseEventKind::Member => {
+                    let Some(data) = data else { continue };
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
                         let character_id = parsed.get("character_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
                         let name = parsed.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
@@ -191,9 +199,14 @@ pub async fn stream_post(
                         }
                     }
                 }
-                SseEventKind::Data => on_delta(data),
+                SseEventKind::Data => {
+                    if let Some(data) = data {
+                        on_delta(data);
+                    }
+                }
             }
         }
+        false
     }
 
     loop {
@@ -225,7 +238,10 @@ pub async fn stream_post(
             .decode_with_buffer_source_and_options(&array, &options)
             .map_err(|e| format!("{e:?}"))?;
         buffer.push_str(&text);
-        drain_events(&mut buffer, &mut on_delta, &mut on_member, &mut on_error);
+        if drain_events(&mut buffer, &mut on_delta, &mut on_member, &mut on_error) {
+            let _ = abort_controller.abort();
+            return Ok(());
+        }
     }
 
     // flush any bytes the streaming decoder held back mid-character on the
@@ -237,7 +253,7 @@ pub async fn stream_post(
     if let Ok(tail) = decoder.decode() {
         if !tail.is_empty() {
             buffer.push_str(&tail);
-            drain_events(&mut buffer, &mut on_delta, &mut on_member, &mut on_error);
+            let _ = drain_events(&mut buffer, &mut on_delta, &mut on_member, &mut on_error);
         }
     }
 
@@ -246,11 +262,31 @@ pub async fn stream_post(
 
 pub const SESSION_EXPIRED_ERROR: &str = "session expired, please log in again";
 
+/// the chat banner is one line under the transcript. a fetch rejection's
+/// debug string includes the whole stack, and that block was tall enough
+/// to be the only thing on screen.
+pub fn brief_net_error(err: impl AsRef<str>) -> String {
+    let err = err.as_ref();
+    if err.contains("Failed to fetch")
+        || err.contains("NetworkError")
+        || err.contains("Load failed")
+        || err.contains("aborted")
+        || err.contains("stream read failed")
+    {
+        return "connection dropped".to_string();
+    }
+    err.lines().next().unwrap_or(err).chars().take(180).collect()
+}
+
 #[derive(PartialEq, Debug)]
 pub(crate) enum SseEventKind {
     Data,
     Error,
     Member,
+    /// server has finished the reply. the bytes are all here. the connection
+    /// itself can stay open for seconds after this, and waiting on that
+    /// close is the pause at the end of a stream.
+    Done,
 }
 
 pub(crate) fn parse_event_block(event_block: &str) -> (SseEventKind, Option<String>) {
@@ -262,6 +298,7 @@ pub(crate) fn parse_event_block(event_block: &str) -> (SseEventKind, Option<Stri
     let kind = match event_name {
         Some("error") => SseEventKind::Error,
         Some("member") => SseEventKind::Member,
+        Some("done") => SseEventKind::Done,
         _ => SseEventKind::Data,
     };
 
@@ -369,9 +406,24 @@ mod tests {
     }
 
     #[test]
+    fn a_fetch_rejection_does_not_keep_its_stack() {
+        let shown = super::brief_net_error(
+            "JsValue(TypeError: Failed to fetch\nTypeError: Failed to fetch\n    at window.fetch)",
+        );
+        assert_eq!(shown, "connection dropped");
+    }
+
+    #[test]
     fn block_with_no_data_line_yields_none() {
         let (kind, data) = parse_event_block("event: ping");
         assert_eq!(kind, SseEventKind::Data);
         assert_eq!(data, None);
+    }
+
+    #[test]
+    fn done_event_is_not_appended_to_the_reply() {
+        let (kind, data) = parse_event_block("event: done\ndata:");
+        assert_eq!(kind, SseEventKind::Done);
+        assert_eq!(data, Some(String::new()));
     }
 }

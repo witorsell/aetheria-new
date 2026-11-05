@@ -280,3 +280,32 @@ async fn fetching_another_users_character_returns_404() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+#[tokio::test]
+async fn brief_create_returns_only_the_id() {
+    let (app, cookie) = common::authed_app().await;
+    let body = serde_json::json!({
+        "name": "Brief Card",
+        "description": "x".repeat(20_000)
+    })
+    .to_string();
+    let created = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/characters")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-response-brief", "1")
+                .header(header::COOKIE, cookie)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(created.into_body(), usize::MAX).await.unwrap();
+    assert!(bytes.len() < 128, "brief body was {} bytes", bytes.len());
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(json["id"].as_str().unwrap().len() > 8);
+    assert!(json.get("description").is_none());
+}
+
