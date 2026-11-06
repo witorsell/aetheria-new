@@ -1,4 +1,4 @@
-use crate::api::{self, Character, RecentChat};
+use crate::api::{self, CharacterSummary, RecentChat};
 use leptos::prelude::*;
 use leptos_router::components::A;
 
@@ -33,13 +33,14 @@ fn initial(name: &str) -> String {
 #[component]
 fn Avatar(name: String, url: Option<String>, forbid_media: bool) -> impl IntoView {
     let letter = initial(&name);
+    let failed = RwSignal::new(false);
     view! {
         <div class="desk-avatar" aria-hidden="true">
-            {if let Some(url) = url.filter(|_| !forbid_media) {
-                view! { <img src=url alt="" /> }.into_any()
-            } else {
-                view! { <span>{letter}</span> }.into_any()
-            }}
+            <span>{letter}</span>
+            {url.filter(|_| !forbid_media).map(|url| view! {
+                <img src=url alt="" loading="lazy" decoding="async" hidden=move || failed.get()
+                    on:error=move |_| failed.set(true) />
+            })}
         </div>
     }
 }
@@ -74,7 +75,7 @@ fn ChatRow(chat: RecentChat, forbid_media: bool) -> impl IntoView {
 }
 
 #[component]
-fn CharacterRow(character: Character, forbid_media: bool) -> impl IntoView {
+fn CharacterRow(character: CharacterSummary, forbid_media: bool) -> impl IntoView {
     let href = format!("/characters/{}", character.id);
     let name = character.name.clone();
     view! {
@@ -91,83 +92,46 @@ fn CharacterRow(character: Character, forbid_media: bool) -> impl IntoView {
 pub fn LandingPage() -> impl IntoView {
     let settings = LocalResource::new(|| async move { api::get_settings().await.ok() });
     let recent = LocalResource::new(|| async move { api::list_recent_chats().await });
-    let characters = LocalResource::new(|| async move { api::list_characters().await });
+    let characters = LocalResource::new(|| async move { api::list_character_summaries(Some(8)).await });
+    let forbid_media = move || settings.get().flatten().map(|s| s.forbid_external_media).unwrap_or(false);
 
     view! {
         <div class="desk">
-            {move || {
-                let forbid_media = settings.get().flatten().map(|s| s.forbid_external_media).unwrap_or(false);
-                let model = settings.get().flatten().map(|s| s.model_name).unwrap_or_default();
-                let model_line = if model.trim().is_empty() {
-                    view! {
-                        <A href="/settings" attr:class="desk-model desk-model-missing">"No model set"</A>
-                    }.into_any()
-                } else {
-                    view! {
-                        <A href="/settings" attr:class="desk-model">{model}</A>
-                    }.into_any()
-                };
-
-                let body = match (recent.get(), characters.get()) {
-                    (None, _) | (_, None) => view! {
-                        <p class="desk-status">"Loading…"</p>
-                    }.into_any(),
-                    (Some(Err(err)), _) => view! {
-                        <p class="error">{err}</p>
-                    }.into_any(),
-                    (_, Some(Err(err))) => view! {
-                        <p class="error">{err}</p>
-                    }.into_any(),
-                    (Some(Ok(chats)), Some(Ok(people))) => {
-                        let chats_view = if chats.is_empty() {
-                            ().into_any()
-                        } else {
-                            view! {
-                                <section class="desk-section">
-                                    <h1>"Continue"</h1>
-                                    <div class="desk-list">
-                                        {chats.into_iter().map(|chat| view! {
-                                            <ChatRow chat=chat forbid_media=forbid_media />
-                                        }).collect_view()}
-                                    </div>
-                                </section>
-                            }.into_any()
-                        };
-                        let people_view = if people.is_empty() {
-                            view! {
-                                <section class="desk-section">
-                                    <h1>"Characters"</h1>
-                                    <p class="desk-status">"No characters yet."</p>
-                                </section>
-                            }.into_any()
-                        } else {
-                            let shown: Vec<Character> = people.into_iter().take(8).collect();
-                            view! {
-                                <section class="desk-section">
-                                    <h1>"Characters"</h1>
-                                    <div class="desk-list">
-                                        {shown.into_iter().map(|character| view! {
-                                            <CharacterRow character=character forbid_media=forbid_media />
-                                        }).collect_view()}
-                                    </div>
-                                </section>
-                            }.into_any()
-                        };
-                        view! {
-                            {chats_view}
-                            {people_view}
-                            <div class="desk-actions">
-                                <A href="/characters/new/edit" attr:class="desk-primary">"New character"</A>
-                            </div>
-                        }.into_any()
-                    }
-                };
-
-                view! {
-                    {model_line}
-                    {body}
-                }
-            }}
+            <header class="collection-header">
+                <h1 class="page-title">"desk"</h1>
+                <A href="/characters/new/edit" attr:class="desk-primary">"new character"</A>
+            </header>
+            <Suspense fallback=|| ()>
+                {move || settings.get().flatten().map(|s| view! {
+                    <A href="/settings" attr:class="desk-model">
+                        {if s.model_name.trim().is_empty() { "choose a model".to_string() } else { s.model_name }}
+                    </A>
+                })}
+            </Suspense>
+            <div class="desk-columns">
+                <section class="desk-section">
+                    <h2>"continue"</h2>
+                    <Suspense fallback=|| view! { <crate::app::PageLoading /> }>
+                        {move || match recent.get() {
+                            None => ().into_any(),
+                            Some(Err(error)) => view! { <p class="error" role="alert">{error}</p><button on:click=move |_| recent.refetch()>"try again"</button> }.into_any(),
+                            Some(Ok(chats)) if chats.is_empty() => view! { <p class="desk-status">"your recent chats will appear here."</p> }.into_any(),
+                            Some(Ok(chats)) => view! { <div class="desk-list">{chats.into_iter().map(|chat| view! { <ChatRow chat=chat forbid_media=forbid_media() /> }).collect_view()}</div> }.into_any(),
+                        }}
+                    </Suspense>
+                </section>
+                <section class="desk-section">
+                    <header class="section-header"><h2>"characters"</h2><A href="/characters">"view all"</A></header>
+                    <Suspense fallback=|| view! { <crate::app::PageLoading /> }>
+                        {move || match characters.get() {
+                            None => ().into_any(),
+                            Some(Err(error)) => view! { <p class="error" role="alert">{error}</p><button on:click=move |_| characters.refetch()>"try again"</button> }.into_any(),
+                            Some(Ok(people)) if people.is_empty() => view! { <p class="desk-status">"create or import your first character."</p> }.into_any(),
+                            Some(Ok(people)) => view! { <div class="desk-list">{people.into_iter().map(|character| view! { <CharacterRow character=character forbid_media=forbid_media() /> }).collect_view()}</div> }.into_any(),
+                        }}
+                    </Suspense>
+                </section>
+            </div>
         </div>
     }
 }

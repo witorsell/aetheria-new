@@ -528,3 +528,16 @@ pub async fn upload_avatar(
 
     Err((StatusCode::BAD_REQUEST, "no file field found".to_string()))
 }
+
+#[derive(serde::Deserialize)]
+pub struct SummaryQuery {
+    limit: Option<i64>,
+}
+
+pub async fn summaries(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<SummaryQuery>,
+) -> Result<Json<Vec<crate::models::character::CharacterSummary>>, ApiError> {
+    Ok(Json(crate::models::character::list_summaries(&state.db.read_pool, user_id, query.limit).await?))
+}

@@ -41,6 +41,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/uploads/{filename}", get(crate::uploads::serve))
         // characters
         
+        .route("/api/characters/summaries", get(characters::summaries))
         .route("/api/characters", get(characters::list).post(characters::create))
         .route("/api/characters/{id}", get(characters::get_character).put(characters::update).delete(characters::delete))
         .route("/api/characters/{id}/generate", post(generate::generate_character_field))

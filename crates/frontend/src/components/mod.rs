@@ -5,3 +5,5 @@ pub mod proxied_image;
 pub mod sidebar;
 pub mod skeleton;
 pub mod toast;
+
+pub mod overlay;

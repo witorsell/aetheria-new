@@ -47,8 +47,8 @@ pub(super) fn UserProfileForm(
     view! {
         <form class="settings-form" on:submit=on_user_submit style="display: flex; flex-direction: column; gap: 2.5rem; margin-bottom: 5rem;">
             <div class="field" style="margin: 0;">
-                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Display Name"</label>
-                <input
+                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings_forms-field-1">"Display Name"</label>
+                <input id="settings_forms-field-1"
                     type="text"
                     placeholder="Your name in roleplays..."
                     prop:value=display_name

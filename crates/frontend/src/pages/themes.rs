@@ -54,7 +54,7 @@ pub fn ThemesPage() -> impl IntoView {
     view! {
         <div class="library-layout">
             <div class="library-pane">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; color: var(--color-text-muted); letter-spacing: -0.02em;">"Themes."</h1>
+                <h1 class="page-title">"Themes."</h1>
                 {move || error.get().map(|e| view! { <p class="error" style="margin-bottom: 1.5rem;">{e}</p> })}
                 <Suspense fallback=|| view! { <p>"Loading..."</p> }>
                     {move || themes.get().map(|list: Vec<api::ThemeListItem>| view! {
@@ -71,7 +71,12 @@ pub fn ThemesPage() -> impl IntoView {
                                 let builtin = t.builtin;
                                 let is_active = t.active;
                                 view! {
-                                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-md);">
+                                    <div class="theme-card" class:is-active=is_active>
+                                        <div class="theme-swatches" aria-label="theme colors">
+                                            <span style=format!("background: {}", t.tokens.color_bg)></span>
+                                            <span style=format!("background: {}", t.tokens.color_accent)></span>
+                                            <span style=format!("background: {}", t.tokens.color_text)></span>
+                                        </div>
                                         <div style="flex: 1;">
                                             <a href=edit_href.clone() style="text-decoration: none; color: inherit;">
                                                 <div style="font-size: 1.1rem; font-family: var(--font-heading);">{t.name.clone()}</div>
@@ -146,7 +151,7 @@ pub fn ThemesPage() -> impl IntoView {
                 </Suspense>
             </div>
             <div class="library-draft">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; letter-spacing: -0.02em;">"Import."</h1>
+                <h1 class="page-title">"Import."</h1>
                 <div style="margin-bottom: 2rem;">
                     <h2 style="font-family: var(--font-heading); font-weight: 300; font-size: 1.5rem; margin-bottom: 1rem;">"Aetheria theme"</h2>
                     <input type="file" accept=".json" on:change=on_import_own node_ref=own_file_input style="display: none;" />
@@ -228,7 +233,7 @@ pub fn ThemeEditorPage() -> impl IntoView {
     view! {
         <div class="library-layout">
             <div class="library-pane">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 0.5rem; letter-spacing: -0.02em;">
+                <h1 class="page-title">
                     <input type="text" prop:value=name on:input=move |ev| name.set(event_target_value(&ev))
                         style="background: transparent; border: none; color: inherit; font: inherit; width: 100%;" />
                 </h1>
@@ -250,8 +255,8 @@ pub fn ThemeEditorPage() -> impl IntoView {
                     {color_field!("Shadow", color_shadow)}
 
                     <div class="field">
-                        <label>"Font scale"</label>
-                        <input type="range" min="0.8" max="1.3" step="0.05"
+                        <label for="themes-field-1">"Font scale"</label>
+                        <input id="themes-field-1" type="range" min="0.8" max="1.3" step="0.05"
                             prop:value=move || tokens.get().font_scale.to_string()
                             on:input=move |ev| {
                                 if let Ok(v) = event_target_value(&ev).parse::<f64>() {
@@ -260,8 +265,8 @@ pub fn ThemeEditorPage() -> impl IntoView {
                             } />
                     </div>
                     <div class="field">
-                        <label>"Blur strength"</label>
-                        <input type="range" min="0" max="20" step="1"
+                        <label for="themes-field-2">"Blur strength"</label>
+                        <input id="themes-field-2" type="range" min="0" max="20" step="1"
                             prop:value=move || tokens.get().blur_strength.to_string()
                             on:input=move |ev| {
                                 if let Ok(v) = event_target_value(&ev).parse::<f64>() {
@@ -275,15 +280,15 @@ pub fn ThemeEditorPage() -> impl IntoView {
                         <label>"Show Aeth (the mascot)"</label>
                     </div>
                     <div class="field">
-                        <label>"Custom CSS"</label>
-                        <textarea style="min-height: 160px; font-family: monospace;"
+                        <label for="themes-field-3">"Custom CSS"</label>
+                        <textarea id="themes-field-3" style="min-height: 160px; font-family: monospace;"
                             prop:value=move || tokens.get().custom_css
                             on:input=move |ev| { let v = event_target_value(&ev); tokens.update(|t| t.custom_css = v); }></textarea>
                     </div>
                 </div>
             </div>
             <div class="library-draft">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; letter-spacing: -0.02em;">"Save."</h1>
+                <h1 class="page-title">"Save."</h1>
                 <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">"Every change previews instantly across the whole app. Nothing is written until you save."</p>
                 <button type="button" class="btn primary" on:click=on_save>"Save Changes"</button>
                 {move || saved.get().then(|| view! { <p style="margin-top: 1rem; color: var(--color-text-muted);">"Saved."</p> })}

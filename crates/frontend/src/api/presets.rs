@@ -109,13 +109,18 @@ pub async fn delete_preset(id: &str) -> Result<(), String> {
 }
 
 pub async fn activate_preset(preset_id: Option<&str>) -> Result<(), String> {
-    Request::post("/api/presets/activate")
+    let response = Request::post("/api/presets/activate")
         .header("Content-Type", "application/json")
         .credentials(web_sys::RequestCredentials::Include)
         .json(&ActivatePresetInput { preset_id })
         .map_err(|e| e.to_string())?
         .send()
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if response.ok() {
+        super::settings::invalidate_settings();
+        Ok(())
+    } else {
+        Err("couldn't activate preset".to_string())
+    }
 }

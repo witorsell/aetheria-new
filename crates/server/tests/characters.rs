@@ -309,3 +309,31 @@ async fn brief_create_returns_only_the_id() {
     assert!(json.get("description").is_none());
 }
 
+
+#[tokio::test]
+async fn summaries_are_small_limited_and_owned() {
+    let (app, cookie_a, cookie_b) = common::authed_app_with_second_user().await;
+    for name in ["first", "second"] {
+        let response = app.clone().oneshot(Request::builder().method("POST")
+            .uri("/api/characters").header(header::CONTENT_TYPE, "application/json")
+            .header(header::COOKIE, &cookie_a)
+            .body(Body::from(serde_json::json!({"name": name, "description": "x".repeat(50_000), "system_prompt": "private prompt"}).to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    for (cookie, query, count) in [(&cookie_a, "", 2), (&cookie_a, "?limit=1", 1), (&cookie_b, "", 0)] {
+        let response = app.clone().oneshot(Request::builder()
+            .uri(format!("/api/characters/summaries{query}"))
+            .header(header::COOKIE, cookie).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(bytes.len() < 1024);
+        let rows: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(rows.len(), count);
+        for row in rows {
+            assert!(row.get("id").is_some());
+            assert!(row.get("description").is_none());
+            assert!(row.get("system_prompt").is_none());
+            assert!(row.get("persona").is_none());
+        }
+    }
+}

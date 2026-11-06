@@ -427,3 +427,16 @@ mod tests {
         assert_eq!(data, Some(String::new()));
     }
 }
+
+pub async fn get_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, String> {
+    let response = Request::get(url)
+        .credentials(web_sys::RequestCredentials::Include)
+        .send().await.map_err(|_| "couldn't connect, please try again".to_string())?;
+    if response.status() == 401 {
+        return Err(SESSION_EXPIRED_ERROR.to_string());
+    }
+    if !response.ok() {
+        return Err(format!("request failed ({})", response.status()));
+    }
+    response.json().await.map_err(|_| "couldn't read the response, please try again".to_string())
+}

@@ -1,4 +1,4 @@
-use crate::api::{self, Chat, Character, GroupWithMembers};
+use crate::api::{self, Chat, CharacterSummary, GroupWithMembers};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -6,7 +6,7 @@ use leptos::task::spawn_local;
 pub fn ChatMembers(
     chat: Signal<Chat>,
     group: Signal<Option<GroupWithMembers>>,
-    all_characters: Signal<Vec<Character>>,
+    all_characters: Signal<Vec<CharacterSummary>>,
     on_change: Callback<()>,
 ) -> impl IntoView {
     let (show_panel, set_show_panel) = signal(false);

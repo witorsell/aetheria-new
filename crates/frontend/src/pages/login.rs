@@ -7,6 +7,7 @@ pub fn LoginPage() -> impl IntoView {
     let (password, set_password) = signal(String::new());
     let (confirm, set_confirm) = signal(String::new());
     let (error, set_error) = signal(Option::<String>::None);
+    let (pending, set_pending) = signal(false);
     let (mode, set_mode) = signal("login");
     let (reg_enabled, set_reg_enabled) = signal(false);
 
@@ -17,6 +18,9 @@ pub fn LoginPage() -> impl IntoView {
 
     let on_submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
+        if pending.get_untracked() { return; }
+        set_error.set(None);
+        set_pending.set(true);
         let m = mode.get_untracked();
         let u = username.get_untracked();
         let p = password.get_untracked();
@@ -25,10 +29,12 @@ pub fn LoginPage() -> impl IntoView {
                 let c = confirm.get_untracked();
                 if p != c {
                     set_error.set(Some("passwords don't match".into()));
+                    set_pending.set(false);
                     return;
                 }
-                if p.len() < 4 {
-                    set_error.set(Some("password must be at least 4 characters".into()));
+                if p.len() < 8 {
+                    set_error.set(Some("password must be at least 8 characters".into()));
+                    set_pending.set(false);
                     return;
                 }
                 match crate::api::register(&u, &p).await {
@@ -45,6 +51,7 @@ pub fn LoginPage() -> impl IntoView {
                     Err(e) => set_error.set(Some(e)),
                 }
             }
+            set_pending.set(false);
         });
     };
 
@@ -55,13 +62,13 @@ pub fn LoginPage() -> impl IntoView {
                     <h1>"aetheria"</h1>
                     <input
                         type="text"
-                        placeholder="Username"
+                        placeholder="Username" aria-label="username" autocomplete="username" required
                         prop:value=username
                         on:input=move |ev| set_username.set(event_target_value(&ev))
                     />
                     <input
                         type="password"
-                        placeholder="Password"
+                        placeholder="Password" aria-label="password" autocomplete=move || if mode.get() == "register" { "new-password" } else { "current-password" } required
                         prop:value=password
                         on:input=move |ev| set_password.set(event_target_value(&ev))
                     />
@@ -69,7 +76,7 @@ pub fn LoginPage() -> impl IntoView {
                         view! {
                             <input
                                 type="password"
-                                placeholder="Confirm password"
+                                placeholder="Confirm password" aria-label="confirm password" autocomplete="new-password" required
                                 prop:value=confirm
                                 on:input=move |ev| set_confirm.set(event_target_value(&ev))
                             />
@@ -77,8 +84,8 @@ pub fn LoginPage() -> impl IntoView {
                     } else {
                         ().into_any()
                     }}
-                    <button type="submit" class="primary">
-                        {move || if mode.get() == "register" { "Create account" } else { "Log in" }}
+                    <button type="submit" class="primary" disabled=move || pending.get()>
+                        {move || if pending.get() { "please wait…" } else if mode.get() == "register" { "Create account" } else { "Log in" }}
                     </button>
                     {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
                 </form>
@@ -86,21 +93,19 @@ pub fn LoginPage() -> impl IntoView {
             {move || if reg_enabled.get() && mode.get() == "login" {
                 view! {
                     <p style="margin-top: 1.5rem; font-family: monospace; font-size: 0.75rem; color: var(--color-text-muted);">
-                        <a
-                            href="javascript:void(0)"
+                        <button type="button"
                             on:click=move |_| set_mode.set("register")
                             style="color: inherit; text-decoration: none; border-bottom: 1px dotted var(--color-border);"
-                        >"Create an account"</a>
+                        >"Create an account"</button>
                     </p>
                 }.into_any()
             } else if reg_enabled.get() && mode.get() == "register" {
                 view! {
                     <p style="margin-top: 1.5rem; font-family: monospace; font-size: 0.75rem; color: var(--color-text-muted);">
-                        <a
-                            href="javascript:void(0)"
+                        <button type="button"
                             on:click=move |_| set_mode.set("login")
                             style="color: inherit; text-decoration: none; border-bottom: 1px dotted var(--color-border);"
-                        >"Already have an account? Log in"</a>
+                        >"Already have an account? Log in"</button>
                     </p>
                 }.into_any()
             } else {

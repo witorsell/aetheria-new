@@ -14,7 +14,7 @@ use crate::pages::terms::TermsPage;
 use crate::pages::privacy::PrivacyPage;
 use crate::theme::ThemeStore;
 use leptos::prelude::*;
-use leptos_router::components::{Route, Router, Routes};
+use leptos_router::components::{Outlet, ParentRoute, Route, Router, Routes};
 use leptos_router::{ParamSegment, StaticSegment};
 
 #[component]
@@ -36,7 +36,7 @@ pub fn NotFoundPage() -> impl IntoView {
 
 #[component]
 pub fn App() -> impl IntoView {
-    let settings = LocalResource::new(|| async move { crate::api::get_settings().await });
+    let session = LocalResource::new(|| async move { crate::api::fetch_me().await });
 
     let active_theme = LocalResource::new(|| async move { crate::api::get_active_theme().await.unwrap_or_default() });
     let theme_tokens = RwSignal::new(crate::api::ThemeTokens::default());
@@ -52,61 +52,64 @@ pub fn App() -> impl IntoView {
     });
 
     view! {
-        <Suspense fallback=|| view! { <div style="display: flex; height: 100vh; background: #0b0b0e;"></div> }>
-            {move || match settings.get() {
+            {move || match session.get() {
                 Some(Ok(_)) => view! {
                     <Router>
                         <crate::components::toast::ToastContainer />
                         <crate::components::mascot::MascotPeekCorner />
                         <Routes fallback=|| view! { <NotFoundPage /> }>
+                            <ParentRoute path=StaticSegment("") view=|| view! { <Sidebar><Suspense fallback=|| view! { <crate::app::PageLoading /> }><Outlet /></Suspense></Sidebar> }>
                             <Route
                                 path=StaticSegment("characters")
-                                view=|| view! { <Sidebar><CharactersPage /></Sidebar> }
+                                view=|| view! { <CharactersPage /> }
                             />
                             <Route
                                 path=(StaticSegment("characters"), ParamSegment("id"), StaticSegment("edit"))
-                                view=|| view! { <Sidebar><CharacterEditorPage /></Sidebar> }
+                                view=|| view! { <CharacterEditorPage /> }
                             />
                             <Route
                                 path=(StaticSegment("characters"), ParamSegment("id"), StaticSegment("chats"))
-                                view=|| view! { <Sidebar><CharacterChatsPage /></Sidebar> }
+                                view=|| view! { <CharacterChatsPage /> }
                             />
                             <Route
                                 path=(StaticSegment("characters"), ParamSegment("id"))
-                                view=|| view! { <Sidebar><CharacterProfilePage /></Sidebar> }
+                                view=|| view! { <CharacterProfilePage /> }
                             />
                             <Route
                                 path=(StaticSegment("chat"), ParamSegment("id"))
-                                view=|| view! { <Sidebar><ChatPage /></Sidebar> }
+                                view=|| view! { <ChatPage /> }
                             />
                             <Route
                                 path=StaticSegment("lorebooks")
-                                view=|| view! { <Sidebar><LorebooksPage /></Sidebar> }
+                                view=|| view! { <LorebooksPage /> }
                             />
                             <Route
                                 path=(StaticSegment("lorebooks"), ParamSegment("id"), StaticSegment("edit"))
-                                view=|| view! { <Sidebar><LorebookEditorPage /></Sidebar> }
+                                view=|| view! { <LorebookEditorPage /> }
                             />
                             <Route
                                 path=StaticSegment("presets")
-                                view=|| view! { <Sidebar><PresetsPage /></Sidebar> }
+                                view=|| view! { <PresetsPage /> }
                             />
                             <Route
                                 path=(StaticSegment("presets"), ParamSegment("id"), StaticSegment("edit"))
-                                view=|| view! { <Sidebar><PresetEditorPage /></Sidebar> }
+                                view=|| view! { <PresetEditorPage /> }
                             />
                             <Route
                                 path=StaticSegment("themes")
-                                view=|| view! { <Sidebar><ThemesPage /></Sidebar> }
+                                view=|| view! { <ThemesPage /> }
                             />
                             <Route
                                 path=(StaticSegment("themes"), ParamSegment("id"), StaticSegment("edit"))
-                                view=|| view! { <Sidebar><ThemeEditorPage /></Sidebar> }
+                                view=|| view! { <ThemeEditorPage /> }
                             />
                             <Route
                                 path=StaticSegment("settings")
-                                view=|| view! { <Sidebar><SettingsPage /></Sidebar> }
+                                view=|| view! { <SettingsPage /> }
                             />
+                            <Route path=StaticSegment("") view=|| view! { <LandingPage /> } />
+                            <Route path=StaticSegment("login") view=|| view! { <LandingPage /> } />
+                            </ParentRoute>
                             <Route
                                 path=StaticSegment("terms")
                                 view=|| view! { <TermsPage /> }
@@ -115,12 +118,14 @@ pub fn App() -> impl IntoView {
                                 path=StaticSegment("privacy")
                                 view=|| view! { <PrivacyPage /> }
                             />
-                            <Route
-                                path=StaticSegment("")
-                                view=|| view! { <Sidebar><LandingPage /></Sidebar> }
-                            />
                         </Routes>
                     </Router>
+                }.into_any(),
+                Some(Err(error)) if error != crate::api::SESSION_EXPIRED_ERROR => view! {
+                    <div class="connection-error" role="alert">
+                        <h1>"couldn't connect"</h1><p>{error}</p>
+                        <button on:click=move |_| session.refetch()>"try again"</button>
+                    </div>
                 }.into_any(),
                 Some(Err(_)) => {
                     let path = web_sys::window()
@@ -132,8 +137,17 @@ pub fn App() -> impl IntoView {
                         _ => view! { <LoginPage /> }.into_any(),
                     }
                 }
-                None => view! { <div style="display: flex; height: 100vh; background: #0b0b0e;"></div> }.into_any(),
+                None => view! { <PageLoading /> }.into_any(),
             }}
-        </Suspense>
+    }
+}
+
+#[component]
+pub fn PageLoading() -> impl IntoView {
+    view! {
+        <div class="page-loading" role="status" aria-live="polite">
+            <p>"loading…"</p>
+            <div class="loading-line"></div><div class="loading-line"></div><div class="loading-line"></div>
+        </div>
     }
 }

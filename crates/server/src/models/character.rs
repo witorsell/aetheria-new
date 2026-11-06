@@ -165,3 +165,18 @@ pub async fn list_folders(pool: &sqlx::SqlitePool, user_id: i64) -> sqlx::Result
         .fetch_all(pool)
         .await
 }
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct CharacterSummary {
+    pub id: String,
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub folder_id: Option<String>,
+    pub talkativeness: f64,
+}
+
+pub async fn list_summaries(pool: &sqlx::SqlitePool, user_id: i64, limit: Option<i64>) -> sqlx::Result<Vec<CharacterSummary>> {
+    sqlx::query_as::<_, CharacterSummary>(
+        "SELECT id, name, avatar_url, folder_id, talkativeness FROM characters WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"
+    ).bind(user_id).bind(limit.map(|n| n.clamp(1, 1000)).unwrap_or(-1)).fetch_all(pool).await
+}

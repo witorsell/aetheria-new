@@ -88,11 +88,11 @@ async fn spawn_mock_provider() -> String {
 
 #[tokio::test]
 async fn nuclear_delete_wipes_content_for_that_user_only() {
-    let (app, cookie_a, cookie_b) = common::authed_app_with_second_user().await;
+    let mock_base_url = spawn_mock_provider().await;
+    let (app, cookie_a, cookie_b) = common::authed_app_with_second_user_and_providers(&[&mock_base_url]).await;
 
     // point A's settings at a mock provider so branching messages (via
     // generate + regenerate) can be created without a real LLM
-    let mock_base_url = spawn_mock_provider().await;
     let settings_body = serde_json::json!({
         "api_base_url": mock_base_url, "api_key": "test-key", "model_name": "test-model",
         "system_prompt": "", "context_limit": 8192, "post_history_instructions": "",

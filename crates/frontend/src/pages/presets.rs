@@ -63,7 +63,7 @@ pub fn PresetsPage() -> impl IntoView {
     view! {
         <div class="library-layout">
             <div class="library-pane">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; color: var(--color-text-muted); letter-spacing: -0.02em;">"Presets."</h1>
+                <h1 class="page-title">"Presets."</h1>
                 <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 1.5rem; max-width: 40rem;">
                     "Import a SillyTavern completion preset to replace how the system prompt is assembled, or a regex script to clean up what gets sent to the model. Both are optional; with no preset active aetheria uses its own built-in prompt assembly."
                 </p>
@@ -188,7 +188,7 @@ pub fn PresetsPage() -> impl IntoView {
             </div>
 
             <div class="library-draft">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; letter-spacing: -0.02em;">"Import."</h1>
+                <h1 class="page-title">"Import."</h1>
                 {move || error.get().map(|e| view! { <p class="error" style="margin-bottom: 1.5rem;">{e}</p> })}
 
                 <div style="margin-bottom: 2.5rem;">
@@ -255,7 +255,7 @@ pub fn PresetEditorPage() -> impl IntoView {
     view! {
         <div class="library-layout">
             <div class="library-pane">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 0.5rem; color: var(--color-text-muted); letter-spacing: -0.02em;">
+                <h1 class="page-title">
                     {move || preset.get().flatten().map(|p| p.name).unwrap_or_default()}
                 </h1>
                 <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-bottom: 2rem;">
@@ -297,7 +297,7 @@ pub fn PresetEditorPage() -> impl IntoView {
             </div>
 
             <div class="library-draft">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; letter-spacing: -0.02em;">"Save."</h1>
+                <h1 class="page-title">"Save."</h1>
                 <button type="button" class="btn primary" on:click=on_save>"Save Changes"</button>
                 {move || saved.get().then(|| view! { <p style="margin-top: 1rem; color: var(--color-text-muted);">"Saved."</p> })}
                 <p style="color: var(--color-text-muted); font-size: 0.875rem; margin-top: 2rem;">

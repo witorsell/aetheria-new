@@ -76,6 +76,10 @@ async fn authed_app_with_provider_origins(origins: &[&str]) -> (axum::Router, St
 /// genuine cross-tenant request (e.g. user b trying to reach user a's data)
 /// rather than just a nonexistent-ID 404.
 pub async fn authed_app_with_second_user() -> (axum::Router, String, String) {
+    authed_app_with_second_user_and_providers(&[]).await
+}
+
+pub async fn authed_app_with_second_user_and_providers(origins: &[&str]) -> (axum::Router, String, String) {
     std::env::set_var(
         "AETHERIA_SESSION_SECRET",
         "test-secret-at-least-64-bytes-long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -97,7 +101,9 @@ pub async fn authed_app_with_second_user() -> (axum::Router, String, String) {
         .await
         .expect("inserting the second user should not fail");
 
-    let app = with_fake_connect_info(server::routes::build_router(server::state::AppState::new(db, true)));
+    let mut state = server::state::AppState::new(db, true);
+    state.provider_network_policy = server::network::ProviderNetworkPolicy::new(origins.iter().copied()).unwrap();
+    let app = with_fake_connect_info(server::routes::build_router(state));
 
     let first_cookie = login(&app, "testuser", "test-pass-1234").await;
     let second_cookie = login(&app, "dana", "also-test-pass-1234").await;

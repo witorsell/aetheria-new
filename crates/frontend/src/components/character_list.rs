@@ -1,7 +1,6 @@
-use crate::api::{self, Character};
+use crate::api::{self, CharacterSummary};
 use leptos::prelude::*;
-use leptos_router::NavigateOptions;
-use leptos_router::hooks::use_navigate;
+use leptos_router::components::A;
 use std::collections::HashMap;
 
 /// shared trigger that lets any descendant (e.g. the Characters page's
@@ -25,19 +24,9 @@ pub fn CharacterList(#[prop(optional)] filter_query: Option<Signal<String>>) -> 
         .map(|v| v.0)
         .unwrap_or_else(|| RwSignal::new(0));
 
-    let navigate = use_navigate();
     let characters = LocalResource::new(move || {
         version.get();
-        let navigate = navigate.clone();
-        async move {
-            match api::list_characters().await {
-                Ok(c) => c,
-                Err(_) => {
-                    navigate("/login", Default::default());
-                    vec![]
-                }
-            }
-        }
+        async move { api::list_character_summaries(None).await }
     });
 
     let show_tags = filter_query.is_some();
@@ -73,14 +62,19 @@ pub fn CharacterList(#[prop(optional)] filter_query: Option<Signal<String>>) -> 
                     // first fetch resolves, distinct from "loaded and empty".
                     // rendering nothing here avoids a flash of the empty-state
                     // mascot on every page load, even for accounts with characters.
-                    None => ().into_any(),
-                    Some(list) if list.is_empty() => view! {
+                    None => view! { <crate::app::PageLoading /> }.into_any(),
+                    Some(Ok(list)) if list.is_empty() => view! {
                         <div class="mascot-empty-state">
                             <crate::components::mascot::Aeth state=Signal::derive(|| crate::components::mascot::MascotState::Empty) class="mascot-empty" />
                             <p style="color: var(--color-text-muted); font-size: 0.875rem;">"No one's here yet."</p>
                         </div>
                     }.into_any(),
-                    Some(list) => {
+                    Some(Err(error)) => view! {
+                        <div role="alert"><p class="error">{error}</p>
+                            <button on:click=move |_| characters.refetch()>"try again"</button>
+                        </div>
+                    }.into_any(),
+                    Some(Ok(list)) => {
                         let tags_by_character = character_tags.get().unwrap_or_default();
                         let tags_by_id: HashMap<String, api::Tag> = all_tags.get().unwrap_or_default()
                             .into_iter().map(|t| (t.id.clone(), t)).collect();
@@ -89,7 +83,7 @@ pub fn CharacterList(#[prop(optional)] filter_query: Option<Signal<String>>) -> 
                         // so multiple terms narrow the results down instead of widening them.
                         let terms: Vec<String> = query.to_lowercase().split_whitespace().map(str::to_string).collect();
 
-                        let filtered: Vec<Character> = list.into_iter().filter(|c| {
+                        let filtered: Vec<CharacterSummary> = list.into_iter().filter(|c| {
                             if terms.is_empty() {
                                 return true;
                             }
@@ -108,7 +102,7 @@ pub fn CharacterList(#[prop(optional)] filter_query: Option<Signal<String>>) -> 
                             }.into_any()
                         } else {
                             filtered.into_iter()
-                                .map(|character: Character| {
+                                .map(|character: CharacterSummary| {
                                     let tags: Vec<api::Tag> = tags_by_character.get(&character.id)
                                         .map(|ids| ids.iter().filter_map(|id| tags_by_id.get(id).cloned()).collect())
                                         .unwrap_or_default();
@@ -125,27 +119,17 @@ pub fn CharacterList(#[prop(optional)] filter_query: Option<Signal<String>>) -> 
 }
 
 #[component]
-fn CharacterListItem(character: Character, #[prop(into)] forbid_media: Signal<bool>, #[prop(optional)] tags: Vec<api::Tag>) -> impl IntoView {
-    let navigate = use_navigate();
-    let character_id = character.id.clone();
+fn CharacterListItem(character: CharacterSummary, #[prop(into)] forbid_media: Signal<bool>, #[prop(optional)] tags: Vec<api::Tag>) -> impl IntoView {
+    let href = format!("/characters/{}", character.id);
+    let edit_href = format!("/characters/{}/edit", character.id);
     let initial = character.name.chars().next().unwrap_or('?').to_uppercase().to_string();
-
-    let nav_for_click = navigate.clone();
-    let on_click = move |_| {
-        let navigate = nav_for_click.clone();
-        let character_id = character_id.clone();
-        if let Some(drawer) = use_context::<crate::components::sidebar::SidebarDrawer>() {
-            drawer.0.set(false);
-        }
-        navigate(&format!("/characters/{}", character_id), NavigateOptions::default());
-    };
-
     view! {
-        <div class="character-list-item" on:click=on_click>
+        <div class="character-list-item">
+            <A href=href attr:class="character-profile-link">
             <div class="character-avatar">
                 {move || {
                     if let Some(url) = character.avatar_url.clone().filter(|_| !forbid_media.get()) {
-                        view! { <img src=url alt="avatar" /> }.into_any()
+                        view! { <img src=url alt="" loading="lazy" decoding="async" /> }.into_any()
                     } else {
                         view! { {initial.clone()} }.into_any()
                     }
@@ -168,15 +152,8 @@ fn CharacterListItem(character: Character, #[prop(into)] forbid_media: Signal<bo
                     }.into_any()
                 }}
             </div>
-            <button class="ghost small edit-btn" on:click={
-                let navigate = navigate.clone();
-                let id = character.id.clone();
-                move |ev| {
-                    ev.stop_propagation();
-                    navigate(&format!("/characters/{id}/edit"), NavigateOptions::default());
-                }
-            }>"✎"</button>
-
+            </A>
+            <A href=edit_href attr:class="edit-btn" attr:aria-label="edit character">"edit"</A>
         </div>
     }
 }

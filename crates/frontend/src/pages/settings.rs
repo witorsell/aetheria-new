@@ -53,6 +53,9 @@ pub fn SettingsPage() -> impl IntoView {
     let (delete_in_progress, set_delete_in_progress) = signal(false);
     let (delete_error, set_delete_error) = signal(Option::<String>::None);
 
+    crate::components::overlay::overlay_keyboard(delete_confirm_open.into(),
+        Callback::new(move |_| { set_delete_confirm_open.set(false); set_delete_confirm_text.set(String::new()); }), ".modal-box");
+
     let me_resource = LocalResource::new(|| async move { crate::api::fetch_me().await });
 
     let (username, set_username) = signal(String::new());
@@ -324,11 +327,15 @@ pub fn SettingsPage() -> impl IntoView {
     };
 
     view! {
-        <div class="settings-page" style="padding: 2rem; max-width: 800px; margin: 0 auto;">
+        <div class="settings-page" >
+            <nav class="settings-jump" aria-label="settings sections">
+                <a href="#settings-profile">"profile"</a><a href="#settings-model">"model"</a>
+                <a href="#settings-memory">"memory"</a><a href="#settings-sampling">"sampling"</a><a href="#settings-data">"data"</a>
+            </nav>
             <p style="margin-bottom: 2rem;"><a class="back-link" href="/characters" style="color: var(--color-text-muted); text-decoration: none; font-family: monospace; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; border-bottom: 1px dotted var(--color-border); padding-bottom: 2px;">"< BACK TO CHARACTERS"</a></p>
             
             <div style="margin-bottom: 3rem;">
-                <h1 style="font-family: var(--font-heading); font-size: 3rem; font-weight: 300; margin: 0; color: #fff; letter-spacing: -0.02em;">"User Profile"</h1>
+                <h1 id="settings-profile" class="page-title">"profile"</h1>
                 <p style="color: var(--color-text-muted); font-family: monospace; margin-top: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em;">"Configure your display name and global persona."</p>
             </div>
 
@@ -350,7 +357,7 @@ pub fn SettingsPage() -> impl IntoView {
             />
 
             <div style="margin-bottom: 3rem;">
-                <h1 style="font-family: var(--font-heading); font-size: 3rem; font-weight: 300; margin: 0; color: #fff; letter-spacing: -0.02em;">"System Manifest"</h1>
+                <h1 id="settings-model" class="page-title">"model settings"</h1>
                 <p style="color: var(--color-text-muted); font-family: monospace; margin-top: 0.5rem; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em;">"Configure core parameters and provider connections."</p>
             </div>
 
@@ -376,7 +383,7 @@ pub fn SettingsPage() -> impl IntoView {
 
             {move || delete_confirm_open.get().then(|| view! {
                 <div class="modal-backdrop" on:click=move |_| { set_delete_confirm_open.set(false); set_delete_confirm_text.set(String::new()); }>
-                    <div class="modal-box" style="max-width: 480px;" on:click=|ev| ev.stop_propagation()>
+                    <div role="dialog" aria-modal="true" aria-label="delete account data" class="modal-box" style="max-width: 480px;" on:click=|ev| ev.stop_propagation()>
                         <div class="modal-header">
                             <h2>"Delete Everything"</h2>
                             <button class="icon-btn" on:click=move |_| { set_delete_confirm_open.set(false); set_delete_confirm_text.set(String::new()); }>
@@ -444,8 +451,8 @@ pub fn SettingsPage() -> impl IntoView {
                     if ["openai", "kobold", "mancer"].contains(&provider_type.get().as_str()) {
                         Some(view! {
                             <div class="field" style="margin: 0;">
-                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Provider (Base URL)"</label>
-                                <input
+                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-1">"Provider (Base URL)"</label>
+                                <input id="settings-field-1"
                                     type="text"
                                     placeholder=""
                                     prop:value=api_base_url.clone()
@@ -539,8 +546,8 @@ pub fn SettingsPage() -> impl IntoView {
                 </div>
                 
                 <div class="field" style="margin: 0;">
-                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"System Prompt"</label>
-                    <textarea
+                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-2">"System Prompt"</label>
+                    <textarea id="settings-field-2"
                         placeholder="Global system prompt..."
                         prop:value=system_prompt
                         on:input=move |ev| set_system_prompt.set(event_target_value(&ev))
@@ -549,8 +556,8 @@ pub fn SettingsPage() -> impl IntoView {
                 </div>
                 
                 <div class="field" style="margin: 0;">
-                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Post-History Instructions"</label>
-                    <textarea
+                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-3">"Post-History Instructions"</label>
+                    <textarea id="settings-field-3"
                         rows="6"
                         placeholder="Enforced instructions..."
                         prop:value=post_history_instructions
@@ -598,8 +605,8 @@ pub fn SettingsPage() -> impl IntoView {
                     if ["openai", "kobold", "mancer"].contains(&effective.as_str()) {
                         Some(view! {
                             <div class="field" style="margin: 0;">
-                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Summarization Base URL"</label>
-                                <input
+                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-4">"Summarization Base URL"</label>
+                                <input id="settings-field-4"
                                     type="text"
                                     placeholder="Same as main"
                                     prop:value=summary_api_base_url
@@ -635,8 +642,8 @@ pub fn SettingsPage() -> impl IntoView {
 
                 <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
                     <div class="field" style="margin: 0; flex: 1; min-width: 250px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Summarization Model Name"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-5">"Summarization Model Name"</label>
+                        <input id="settings-field-5"
                             type="text"
                             placeholder="Same as main"
                             prop:value=summary_model_name
@@ -646,8 +653,8 @@ pub fn SettingsPage() -> impl IntoView {
                     </div>
 
                     <div class="field" style="margin: 0; flex: 1; min-width: 250px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Summarization Context Limit"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-6">"Summarization Context Limit"</label>
+                        <input id="settings-field-6"
                             type="number"
                             min="0"
                             step="256"
@@ -661,7 +668,7 @@ pub fn SettingsPage() -> impl IntoView {
                 </div>
 
                 <div style="border-top: 1px solid var(--color-border); padding-top: 2rem;">
-                    <h2 style="font-family: var(--font-heading); font-size: 1.4rem; font-weight: 400; margin: 0; color: #fff;">"Long-Term Memory"</h2>
+                    <h2 id="settings-memory">"long-term memory"</h2>
                     <p style="color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; margin-top: 0.4rem; opacity: 0.8;">"Pulls old, semantically relevant messages back into context by similarity, even after they've fallen out of the token window. Off by default."</p>
                 </div>
 
@@ -694,8 +701,8 @@ pub fn SettingsPage() -> impl IntoView {
                     (embedding_source.get() == "api").then(|| view! {
                         <>
                         <div class="field" style="margin: 0;">
-                            <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Embedding Base URL"</label>
-                            <input
+                            <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-7">"Embedding Base URL"</label>
+                            <input id="settings-field-7"
                                 type="text"
                                 placeholder="Same as main"
                                 prop:value=embedding_api_base_url
@@ -725,8 +732,8 @@ pub fn SettingsPage() -> impl IntoView {
                         </div>
 
                         <div class="field" style="margin: 0;">
-                            <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Embedding Model Name"</label>
-                            <input
+                            <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-8">"Embedding Model Name"</label>
+                            <input id="settings-field-8"
                                 type="text"
                                 placeholder="text-embedding-3-small"
                                 prop:value=embedding_model_name
@@ -742,8 +749,8 @@ pub fn SettingsPage() -> impl IntoView {
                     (!embedding_source.get().is_empty()).then(|| view! {
                         <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
                             <div class="field" style="margin: 0; flex: 1; min-width: 250px;">
-                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Retrieval Top K"</label>
-                                <input
+                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-9">"Retrieval Top K"</label>
+                                <input id="settings-field-9"
                                     type="number"
                                     min="1"
                                     step="1"
@@ -759,8 +766,8 @@ pub fn SettingsPage() -> impl IntoView {
                             </div>
 
                             <div class="field" style="margin: 0; flex: 1; min-width: 250px;">
-                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Retrieval Score Threshold"</label>
-                                <input
+                                <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-10">"Retrieval Score Threshold"</label>
+                                <input id="settings-field-10"
                                     type="number"
                                     min="0"
                                     max="1"
@@ -780,14 +787,14 @@ pub fn SettingsPage() -> impl IntoView {
                 }}
 
                 <div style="border-top: 1px solid var(--color-border); padding-top: 2rem;">
-                    <h2 style="font-family: var(--font-heading); font-size: 1.4rem; font-weight: 400; margin: 0; color: #fff;">"Sampling Parameters"</h2>
+                    <h2 id="settings-sampling">"sampling"</h2>
                     <p style="color: var(--color-text-muted); font-family: monospace; font-size: 0.8rem; margin-top: 0.4rem; opacity: 0.8;">"Sent with every generation request to the main model above."</p>
                 </div>
 
                 <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
                     <div class="field" style="margin: 0; flex: 1; min-width: 200px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Temperature"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-11">"Temperature"</label>
+                        <input id="settings-field-11"
                             type="number"
                             min="0"
                             step="0.05"
@@ -802,8 +809,8 @@ pub fn SettingsPage() -> impl IntoView {
                     </div>
 
                     <div class="field" style="margin: 0; flex: 1; min-width: 200px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Top P"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-12">"Top P"</label>
+                        <input id="settings-field-12"
                             type="number"
                             min="0"
                             max="1"
@@ -819,8 +826,8 @@ pub fn SettingsPage() -> impl IntoView {
                     </div>
 
                     <div class="field" style="margin: 0; flex: 1; min-width: 200px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Top K"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-13">"Top K"</label>
+                        <input id="settings-field-13"
                             type="number"
                             min="0"
                             step="1"
@@ -838,8 +845,8 @@ pub fn SettingsPage() -> impl IntoView {
 
                 <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
                     <div class="field" style="margin: 0; flex: 1; min-width: 200px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Frequency Penalty"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-14">"Frequency Penalty"</label>
+                        <input id="settings-field-14"
                             type="number"
                             step="0.05"
                             prop:value=move || frequency_penalty.get().to_string()
@@ -853,8 +860,8 @@ pub fn SettingsPage() -> impl IntoView {
                     </div>
 
                     <div class="field" style="margin: 0; flex: 1; min-width: 200px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Presence Penalty"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-15">"Presence Penalty"</label>
+                        <input id="settings-field-15"
                             type="number"
                             step="0.05"
                             prop:value=move || presence_penalty.get().to_string()
@@ -868,8 +875,8 @@ pub fn SettingsPage() -> impl IntoView {
                     </div>
 
                     <div class="field" style="margin: 0; flex: 1; min-width: 200px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Max Response Tokens"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-16">"Max Response Tokens"</label>
+                        <input id="settings-field-16"
                             type="number"
                             min="0"
                             step="64"
@@ -909,8 +916,8 @@ pub fn SettingsPage() -> impl IntoView {
 
                 <div style="display: flex; gap: 2rem; border-top: 1px solid var(--color-border); padding-top: 2rem; flex-wrap: wrap;">
                     <div class="field" style="margin: 0; flex: 1; min-width: 250px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Context Limit (Tokens)"</label>
-                        <input
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-field-17">"Context Limit (Tokens)"</label>
+                        <input id="settings-field-17"
                             type="number"
                             min="0"
                             step="256"
@@ -968,7 +975,7 @@ pub fn SettingsPage() -> impl IntoView {
             <div style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--color-error);">
                 <h3 style="color: var(--color-error); font-family: monospace; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 1rem;">"Danger Zone"</h3>
                 <div style="display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <button type="button" on:click=on_export_account style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
+                    <button type="button" id="settings-data" on:click=on_export_account style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">
                         "Export My Data"
                     </button>
                     <label style="background: transparent; border: 1px solid var(--color-border); color: var(--color-text); padding: 0.6rem 1.25rem; font-family: monospace; text-transform: uppercase; font-size: 0.8rem; cursor: pointer; letter-spacing: 0.05em;">

@@ -113,15 +113,22 @@ pub struct UpdateMeRequest {
     pub display_name: Option<String>,
 }
 
+thread_local! {
+    static SETTINGS_CACHE: std::cell::RefCell<Option<(f64, SettingsView)>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn invalidate_settings() {
+    SETTINGS_CACHE.with(|cache| *cache.borrow_mut() = None);
+}
+
 pub async fn get_settings() -> Result<SettingsView, String> {
-    Request::get("/api/settings")
-        .credentials(web_sys::RequestCredentials::Include)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())
+    if let Some(value) = SETTINGS_CACHE.with(|cache| cache.borrow().as_ref()
+        .filter(|(at, _)| js_sys::Date::now() - at < 30_000.0).map(|(_, value)| value.clone())) {
+        return Ok(value);
+    }
+    let value: SettingsView = super::core::get_json("/api/settings").await?;
+    SETTINGS_CACHE.with(|cache| *cache.borrow_mut() = Some((js_sys::Date::now(), value.clone())));
+    Ok(value)
 }
 
 pub async fn update_settings(req: UpdateSettingsRequest) -> Result<(), String> {
@@ -134,6 +141,7 @@ pub async fn update_settings(req: UpdateSettingsRequest) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     if response.ok() {
+        invalidate_settings();
         Ok(())
     } else {
         Err("failed to save settings".to_string())
@@ -161,6 +169,7 @@ pub async fn import_settings(export: &SettingsExport) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     if response.ok() {
+        invalidate_settings();
         Ok(())
     } else {
         Err("failed to import settings".to_string())
@@ -191,14 +200,7 @@ pub async fn list_models(subscription_only: bool) -> Result<Vec<ModelListItem>, 
 }
 
 pub async fn fetch_me() -> Result<MeResponse, String> {
-    Request::get("/api/me")
-        .credentials(web_sys::RequestCredentials::Include)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())
+    super::core::get_json("/api/me").await
 }
 
 pub async fn update_me(req: UpdateMeRequest) -> Result<(), String> {

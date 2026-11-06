@@ -34,6 +34,9 @@ pub fn Sidebar(children: Children) -> impl IntoView {
     let drawer_open = RwSignal::new(false);
     provide_context(SidebarDrawer(drawer_open));
 
+    crate::components::overlay::overlay_keyboard(
+        drawer_open.into(), Callback::new(move |_| drawer_open.set(false)), ".sidebar",
+    );
     let close_drawer = move |_| drawer_open.set(false);
 
     view! {
@@ -41,7 +44,9 @@ pub fn Sidebar(children: Children) -> impl IntoView {
             <div class="mobile-topbar">
                 <button
                     class="hamburger"
-                    aria-label="Menu"
+                    aria-label="menu"
+                    aria-controls="main-navigation"
+                    aria-expanded=move || drawer_open.get().to_string()
                     on:click=move |_| drawer_open.update(|open| *open = !*open)
                 >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -57,7 +62,7 @@ pub fn Sidebar(children: Children) -> impl IntoView {
                 class:open=move || drawer_open.get()
                 on:click=move |_| drawer_open.set(false)
             ></div>
-            <aside class="sidebar" class:open=move || drawer_open.get()>
+            <aside id="main-navigation" aria-label="main navigation" class="sidebar" class:open=move || drawer_open.get()>
                 <A href="/" attr:class="sidebar-wordmark" on:click=move |_| drawer_open.set(false)>"aetheria"</A>
                 <nav class="sidebar-nav">
                     <NavLink href="/" exact=true>"Desk"</NavLink>

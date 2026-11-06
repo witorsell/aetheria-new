@@ -234,7 +234,8 @@
   }
 
   function blobFor(url) {
-    const key = new URL(url, location.href).pathname;
+    const parsed = new URL(url, location.href);
+    const key = parsed.pathname + parsed.search;
     if (blobs.has(key)) return Promise.resolve(blobs.get(key));
     if (inflight.has(key)) return inflight.get(key);
     const job = (async () => {

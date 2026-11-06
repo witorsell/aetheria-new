@@ -160,7 +160,7 @@ pub fn CharacterEditorPage() -> impl IntoView {
                     <button
                         class:active=move || tab.get() == EditorTab::Lorebooks
                         on:click=move |_| set_tab.set(EditorTab::Lorebooks)
-                    >"Grimoires"</button>
+                    >"lorebooks"</button>
                     <button
                         class:active=move || tab.get() == EditorTab::Tags
                         on:click=move |_| set_tab.set(EditorTab::Tags)
@@ -343,8 +343,8 @@ pub fn CharacterEditorPage() -> impl IntoView {
                             </label>
 
                             <div class="field">
-                                <label>"Talkativeness"</label>
-                                <input
+                                <label for="character_editor-field-1">"Talkativeness"</label>
+                                <input id="character_editor-field-1"
                                     type="number"
                                     min="0"
                                     max="1"
@@ -405,7 +405,7 @@ pub fn CharacterEditorPage() -> impl IntoView {
 
                     <Show when=move || tab.get() == EditorTab::Lorebooks>
                         <div class="tab-content">
-                            <label style="margin-bottom: 0.5rem; display: block; font-weight: 500;">"Attached Grimoires"</label>
+                            <label style="margin-bottom: 0.5rem; display: block; font-weight: 500;">"attached lorebooks"</label>
                             <div style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 400px; overflow-y: auto; padding: 0.5rem; border: 1px solid var(--color-border);">
                                 {move || all_lorebooks.get().into_iter().map(|lb| {
                                     let id = lb.id.clone();

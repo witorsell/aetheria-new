@@ -43,11 +43,11 @@ pub fn ChatPage() -> impl IntoView {
     let settings = LocalResource::new(|| async move { crate::api::get_settings().await.ok() });
     let forbid_media = move || settings.get().flatten().map(|s| s.forbid_external_media).unwrap_or(false);
 
-    let all_characters = LocalResource::new(|| async move { crate::api::list_characters().await.unwrap_or_default() });
+    let all_characters = LocalResource::new(|| async move { crate::api::list_character_summaries(None).await.unwrap_or_default() });
     let character_by_id = Memo::new(move |_| {
         all_characters.get().unwrap_or_default().into_iter()
             .map(|c| (c.id.clone(), c))
-            .collect::<HashMap<String, crate::api::Character>>()
+            .collect::<HashMap<String, crate::api::CharacterSummary>>()
     });
     
     let char_name_sig = Signal::derive(move || {
@@ -330,6 +330,16 @@ pub fn ChatPage() -> impl IntoView {
     Effect::new(move |_| {
         install_tail_follow_break(gen_states, chat_id);
     });
+
+    crate::components::overlay::overlay_keyboard(
+        Signal::derive(move || show_chat_settings.get() || pending_delete_message.get().is_some() || open_prompt_id.get().is_some() || more_menu_open.get()),
+        Callback::new(move |_| {
+            set_show_chat_settings.set(false);
+            set_pending_delete_message.set(None);
+            set_open_prompt_id.set(None);
+            set_more_menu_open.set(false);
+        }), ".modal-box, .more-menu-panel",
+    );
 
     let signals = ChatSignals {
         chat_id,
@@ -1176,7 +1186,7 @@ pub fn ChatPage() -> impl IntoView {
                                         };
                                         view! {
                                             <div class="more-menu-backdrop" on:click=move |_| set_more_menu_open.set(false)></div>
-                                            <div class="more-menu-panel">
+                                            <div class="more-menu-panel" role="group" aria-label="generation options">
                                                 {continue_item}
                                                 <button
                                                     type="button"
@@ -1244,7 +1254,7 @@ pub fn ChatPage() -> impl IntoView {
                     let crate::api::MessageNode { raw_prompt, prompt_tokens, context_limit, .. } = node;
                     view! {
                         <div class="modal-backdrop" on:click=move |_| set_open_prompt_id.set(None)>
-                            <div class="modal-box" on:click=|ev| ev.stop_propagation()>
+                            <div role="dialog" aria-modal="true" aria-label="chat dialog" class="modal-box" on:click=|ev| ev.stop_propagation()>
                                 <div class="modal-header">
                                     <strong>"Raw prompt"</strong>
                                     <button
@@ -1271,7 +1281,7 @@ pub fn ChatPage() -> impl IntoView {
                 if show_chat_settings.get() {
                     view! {
                         <div class="modal-backdrop" on:click=move |_| set_show_chat_settings.set(false)>
-                            <div class="modal-box" on:click=|ev| ev.stop_propagation()>
+                            <div role="dialog" aria-modal="true" aria-label="chat dialog" class="modal-box" on:click=|ev| ev.stop_propagation()>
                                 <div class="modal-header">
                                     <strong>"Chat Settings"</strong>
                                     <button
@@ -1286,7 +1296,7 @@ pub fn ChatPage() -> impl IntoView {
                                     </button>
                                 </div>
                                 <div class="modal-body" style="padding: 1rem;">
-                                    <label style="margin-bottom: 0.5rem; display: block; font-weight: 500;">"Attached Grimoires (Chat-specific)"</label>
+                                    <label style="margin-bottom: 0.5rem; display: block; font-weight: 500;">"attached lorebooks (Chat-specific)"</label>
                                     <div style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 400px; overflow-y: auto; padding: 0.5rem; border: 1px solid var(--color-border); margin-bottom: 1rem;">
                                         {all_lorebooks.get().into_iter().map(|lb| {
                                             let id = lb.id.clone();
@@ -1334,7 +1344,7 @@ pub fn ChatPage() -> impl IntoView {
                 let id_for_all = id.clone();
                 view! {
                     <div class="modal-backdrop" on:click=move |_| set_pending_delete_message.set(None)>
-                        <div class="modal-box" style="max-width: 400px;" on:click=|ev| ev.stop_propagation()>
+                        <div role="dialog" aria-modal="true" aria-label="chat dialog" class="modal-box" style="max-width: 400px;" on:click=|ev| ev.stop_propagation()>
                             <div class="modal-header">
                                 <h2>"Delete Message"</h2>
                                 <button class="icon-btn" on:click=move |_| set_pending_delete_message.set(None)>

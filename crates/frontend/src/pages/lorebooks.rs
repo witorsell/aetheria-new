@@ -75,7 +75,7 @@ pub fn LorebooksPage() -> impl IntoView {
     view! {
         <div class="library-layout">
             <div class="library-pane">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; color: var(--color-text-muted); letter-spacing: -0.02em;">"Lorebooks."</h1>
+                <h1 class="page-title">"Lorebooks."</h1>
                 <Suspense fallback=|| view! { <p>"Loading..."</p> }>
                     {move || lorebooks.get().map(|list: Vec<crate::api::Lorebook>| view! {
                         <div style="display: flex; flex-direction: column; gap: 1rem;">
@@ -94,15 +94,15 @@ pub fn LorebooksPage() -> impl IntoView {
             </div>
             
             <div class="library-draft">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; letter-spacing: -0.02em;">"Create a lorebook."</h1>
+                <h1 class="page-title">"Create a lorebook."</h1>
                 <form on:submit=on_create style="display: flex; flex-direction: column; gap: 2rem;">
                     <div class="field">
-                        <label>"Title"</label>
-                        <input type="text" placeholder="Name of the lorebook..." prop:value=name on:input=move |ev| set_name.set(event_target_value(&ev)) />
+                        <label for="lorebooks-field-1">"Title"</label>
+                        <input id="lorebooks-field-1" type="text" placeholder="Name of the lorebook..." prop:value=name on:input=move |ev| set_name.set(event_target_value(&ev)) />
                     </div>
                     <div class="field">
-                        <label>"Purpose"</label>
-                        <input type="text" placeholder="What secrets does it hold?" prop:value=description on:input=move |ev| set_description.set(event_target_value(&ev)) />
+                        <label for="lorebooks-field-2">"Purpose"</label>
+                        <input id="lorebooks-field-2" type="text" placeholder="What secrets does it hold?" prop:value=description on:input=move |ev| set_description.set(event_target_value(&ev)) />
                     </div>
                     <button type="submit" class="btn primary" style="align-self: flex-start; margin-top: 1rem;">"Create"</button>
                 </form>
@@ -181,7 +181,7 @@ pub fn LorebookEditorPage() -> impl IntoView {
     view! {
         <div class="library-layout">
             <div class="library-pane">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; color: var(--color-text-muted); letter-spacing: -0.02em;">"Entries."</h1>
+                <h1 class="page-title">"Entries."</h1>
                 <Suspense fallback=|| view! { <p>"Loading..."</p> }>
                     {move || entries.get().map(|list: Vec<crate::api::LorebookEntry>| view! {
                         <div style="display: flex; flex-direction: column; gap: 1rem;">
@@ -198,19 +198,19 @@ pub fn LorebookEditorPage() -> impl IntoView {
             </div>
             
             <div class="library-draft">
-                <h1 style="font-family: var(--font-heading); font-weight: 300; font-size: 3rem; margin-bottom: 2rem; letter-spacing: -0.02em;">"New entry."</h1>
+                <h1 class="page-title">"New entry."</h1>
                 <form on:submit=on_add style="display: flex; flex-direction: column; gap: 2rem;">
                     <div class="field">
-                        <label>"Name"</label>
-                        <input type="text" placeholder="Entry identifier..." prop:value=entry_name on:input=move |ev| set_entry_name.set(event_target_value(&ev)) />
+                        <label for="lorebooks-field-3">"Name"</label>
+                        <input id="lorebooks-field-3" type="text" placeholder="Entry identifier..." prop:value=entry_name on:input=move |ev| set_entry_name.set(event_target_value(&ev)) />
                     </div>
                     <div class="field">
-                        <label>"Keys (comma separated)"</label>
-                        <input type="text" placeholder="apple, banana, fruit..." prop:value=entry_keys on:input=move |ev| set_entry_keys.set(event_target_value(&ev)) />
+                        <label for="lorebooks-field-4">"Keys (comma separated)"</label>
+                        <input id="lorebooks-field-4" type="text" placeholder="apple, banana, fruit..." prop:value=entry_keys on:input=move |ev| set_entry_keys.set(event_target_value(&ev)) />
                     </div>
                     <div class="field">
-                        <label>"Text"</label>
-                        <textarea placeholder="The knowledge to inject..." prop:value=entry_text on:input=move |ev| set_entry_text.set(event_target_value(&ev)) style="min-height: 100px; resize: vertical;"></textarea>
+                        <label for="lorebooks-field-5">"Text"</label>
+                        <textarea id="lorebooks-field-5" placeholder="The knowledge to inject..." prop:value=entry_text on:input=move |ev| set_entry_text.set(event_target_value(&ev)) style="min-height: 100px; resize: vertical;"></textarea>
                     </div>
                     <button type="submit" class="btn primary" style="align-self: flex-start; margin-top: 1rem;">"Add Entry"</button>
                 </form>

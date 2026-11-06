@@ -15,16 +15,19 @@ pub struct LoadedChat {
 /// screen. using it after a reply replaces the transcript with a shorter
 /// chain, which is the wipe.
 pub async fn load_tree(id: &str, allow_fallback: bool) -> Option<LoadedChat> {
-    let mut tree_data = None;
-    for attempt in 0..2 {
-        if attempt > 0 {
-            gloo_timers::future::TimeoutFuture::new(350).await;
+    let (tree_data, chat) = futures_util::join!(async {
+        let mut tree_data = None;
+        for attempt in 0..2 {
+            if attempt > 0 {
+                gloo_timers::future::TimeoutFuture::new(350).await;
+            }
+            if let Ok(t) = crate::api::list_messages(id).await {
+                tree_data = Some(t);
+                break;
+            }
         }
-        if let Ok(t) = crate::api::list_messages(id).await {
-            tree_data = Some(t);
-            break;
-        }
-    }
+        tree_data
+    }, crate::api::get_chat(id));
     let mut tree_data = match tree_data {
         Some(t) => t,
         None if allow_fallback => {
@@ -54,7 +57,7 @@ pub async fn load_tree(id: &str, allow_fallback: bool) -> Option<LoadedChat> {
         None => return None,
     };
 
-    let chat = match crate::api::get_chat(id).await {
+    let chat = match chat {
         Ok(chat) => {
             if tree_data.character.is_none() {
                 if let Some(cid) = &chat.character_id {

@@ -684,3 +684,18 @@ fn extract_card_field_str<'a>(data: &'a serde_json::Value, keys: &[&str]) -> Opt
     }
     None
 }
+
+#[derive(Deserialize, Clone, PartialEq)]
+pub struct CharacterSummary {
+    pub id: String,
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub folder_id: Option<String>,
+    pub talkativeness: f64,
+}
+
+pub async fn list_character_summaries(limit: Option<usize>) -> Result<Vec<CharacterSummary>, String> {
+    let url = limit.map(|n| format!("/api/characters/summaries?limit={n}"))
+        .unwrap_or_else(|| "/api/characters/summaries".to_string());
+    super::core::get_json(&url).await
+}

@@ -192,7 +192,7 @@ pub(super) fn regeneration_parent_id(branch: &[crate::api::MessageNode]) -> Opti
 /// looks it up by character_id in the group member map first, falling back
 /// to the chat's single fixed character for 1:1 chats (or if the id's missing).
 pub(super) fn speaker_for(
-    character_by_id: &HashMap<String, crate::api::Character>,
+    character_by_id: &HashMap<String, crate::api::CharacterSummary>,
     fallback_character: &Option<crate::api::Character>,
     character_id: &Option<String>,
 ) -> (String, Option<String>) {
