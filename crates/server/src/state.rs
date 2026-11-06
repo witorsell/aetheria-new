@@ -64,16 +64,10 @@ pub struct AppState {
     pub cookie_key: Key,
     pub encryption_key: [u8; 32],
     pub image_cache: Cache<String, CachedImage>,
-    /// shared, pooled HTTP client for all provider and embedding API calls.
-    /// reused across requests so connection-pool / DNS-cache / TLS handshake
-    /// costs are paid once, not per-generation.
-    pub http_client: reqwest::Client,
-    /// shared, pooled HTTP client for proxying arbitrary user-supplied image/
-    /// avatar URLs. kept separate from `http_client` since it carries SSRF
-    /// protections (see `routes::proxy::SafeResolver`) and proxy-specific
-    /// settings (spoofed user agent, no redirects) that provider calls to
-    /// known/trusted endpoints don't need.
+    pub provider_network_policy: crate::network::ProviderNetworkPolicy,
+    provider_clients: Cache<String, reqwest::Client>,
     pub proxy_client: reqwest::Client,
+    pub proxy_fetch_slots: std::sync::Arc<tokio::sync::Semaphore>,
     /// failed login attempts per username. keyed lowercase so the
     /// lockout can't be dodged by varying case. TTL doubles as the lockout
     /// window: every failed attempt refreshes it, so a username under active
@@ -113,22 +107,18 @@ impl AppState {
     pub fn new(db: Db, registration_enabled: bool) -> Self {
         let secret = std::env::var("AETHERIA_SESSION_SECRET")
             .expect("AETHERIA_SESSION_SECRET must be set (>= 64 random bytes, base64 or raw)");
+        assert!(secret.len() >= 64 && !secret.starts_with("your_"),
+            "AETHERIA_SESSION_SECRET must contain at least 64 random characters");
         let encryption_key_str = std::env::var("AETHERIA_ENCRYPTION_KEY")
             .expect("AETHERIA_ENCRYPTION_KEY must be set (exactly 32 bytes)");
 
         let session_idle_timeout = idle_timeout();
         let session_absolute_max_age = absolute_max_age();
 
-        let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .pool_max_idle_per_host(4)
-            .build()
-            .expect("building reqwest client should not fail");
-
-        let img_cache_cap = std::env::var("AETHERIA_IMAGE_CACHE_MAX_CAPACITY")
+        let img_cache_cap = std::env::var("AETHERIA_IMAGE_CACHE_MAX_BYTES")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(500);
+            .unwrap_or(128 * 1024 * 1024);
         let img_cache_ttl = std::env::var("AETHERIA_IMAGE_CACHE_TTL_SECS")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -142,10 +132,13 @@ impl AppState {
                 .try_into()
                 .expect("AETHERIA_ENCRYPTION_KEY must be exactly 32 bytes"),
             image_cache: Cache::builder()
+                .weigher(|_: &String, image: &CachedImage| image.bytes.len().min(u32::MAX as usize) as u32)
                 .max_capacity(img_cache_cap)
                 .time_to_live(Duration::from_secs(img_cache_ttl))
                 .build(),
-            http_client,
+            provider_network_policy: crate::network::ProviderNetworkPolicy::from_env(),
+            provider_clients: Cache::builder().max_capacity(128).build(),
+            proxy_fetch_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
             proxy_client: crate::routes::proxy::build_proxy_client(),
             login_attempts: Cache::builder()
                 .max_capacity(10_000)
@@ -166,6 +159,26 @@ impl AppState {
             registration_enabled,
             session_idle_timeout,
             session_absolute_max_age,
+        }
+    }
+
+    pub async fn provider_client(&self, endpoint: &str) -> Result<reqwest::Client, crate::error::ApiError> {
+        crate::network::provider_client(&self.provider_network_policy, &self.provider_clients, endpoint).await
+    }
+
+    pub async fn provider_client_for(&self, provider_type: &str, endpoint: &str) -> Result<reqwest::Client, crate::error::ApiError> {
+        let endpoint = match (provider_type, endpoint) {
+            ("gemini", "") => "https://generativelanguage.googleapis.com",
+            ("horde", "") => "https://aihorde.net/api/v2",
+            (_, endpoint) => endpoint,
+        };
+        self.provider_client(endpoint).await
+    }
+
+    pub async fn embedding_client(&self, backend: &crate::models::settings::EmbeddingBackend) -> Result<reqwest::Client, crate::error::ApiError> {
+        match backend {
+            crate::models::settings::EmbeddingBackend::Api { api_base_url, .. } => self.provider_client(api_base_url).await,
+            crate::models::settings::EmbeddingBackend::Local => Ok(self.proxy_client.clone()),
         }
     }
 

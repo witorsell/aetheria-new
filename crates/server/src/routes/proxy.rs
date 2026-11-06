@@ -6,6 +6,7 @@ use axum::{
     response::IntoResponse,
 };
 use reqwest::Client;
+use futures_util::StreamExt;
 use serde::Deserialize;
 use url::Url;
 use std::net::IpAddr;
@@ -42,7 +43,7 @@ fn url_has_media_extension(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn is_private_ip(ip: IpAddr) -> bool {
+pub(crate) fn is_private_ip(ip: IpAddr) -> bool {
     // normalize an IPv4-mapped IPv6 literal (::ffff:a.b.c.d) to its IPv4
     // form first - the CIDR list below is IPv4/IPv6 native only, so a
     // mapped literal like ::ffff:127.0.0.1 would silently miss every entry
@@ -53,6 +54,12 @@ fn is_private_ip(ip: IpAddr) -> bool {
     };
 
     let private_networks = [
+        "0.0.0.0/8",        // unspecified
+        "100.64.0.0/10",    // shared address space
+        "224.0.0.0/4",      // multicast
+        "240.0.0.0/4",      // reserved
+        "::/128",           // unspecified
+        "ff00::/8",         // multicast
         "127.0.0.0/8",      // loopback
         "10.0.0.0/8",       // private lan
         "172.16.0.0/12",    // private lan
@@ -84,15 +91,12 @@ fn validate_target(parsed_url: &Url) -> Result<(), StatusCode> {
     if parsed_url.scheme() != "http" && parsed_url.scheme() != "https" {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let Some(host_str) = parsed_url.host_str() else {
-        return Err(StatusCode::BAD_REQUEST);
-    };
-    if let Ok(ip) = host_str.parse::<IpAddr>() {
-        if is_private_ip(ip) {
-            return Err(StatusCode::FORBIDDEN);
-        }
-    } else if host_str.eq_ignore_ascii_case("localhost") {
-        return Err(StatusCode::FORBIDDEN);
+    match parsed_url.host() {
+        Some(url::Host::Ipv4(ip)) if is_private_ip(ip.into()) => return Err(StatusCode::FORBIDDEN),
+        Some(url::Host::Ipv6(ip)) if is_private_ip(ip.into()) => return Err(StatusCode::FORBIDDEN),
+        Some(url::Host::Domain(host)) if host.trim_end_matches('.').eq_ignore_ascii_case("localhost") => return Err(StatusCode::FORBIDDEN),
+        None => return Err(StatusCode::BAD_REQUEST),
+        _ => {}
     }
     Ok(())
 }
@@ -154,6 +158,7 @@ pub fn build_proxy_client() -> Client {
         .user_agent(PROXY_USER_AGENT)
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .dns_resolver(SafeResolver)
         .build()
         .expect("building proxy reqwest client should not fail")
@@ -202,6 +207,10 @@ pub async fn proxy_image(Extension(_user_id): Extension<i64>,
             .into_response();
     }
 
+    let _permit = match state.proxy_fetch_slots.try_acquire() {
+        Ok(permit) => permit,
+        Err(_) => return (StatusCode::TOO_MANY_REQUESTS, "Too many media fetches").into_response(),
+    };
     let res = match state.proxy_client.get(&query.url).send().await {
         Ok(res) => res,
         Err(e) => {
@@ -228,9 +237,9 @@ pub async fn proxy_image(Extension(_user_id): Extension<i64>,
     }
     let content_type = content_type_header.unwrap_or_else(|| "image/jpeg".to_string());
 
-    let bytes = match res.bytes().await {
+    let bytes = match read_media_body(res).await {
         Ok(bytes) => bytes,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read image body").into_response(),
+        Err(status) => return (status, "Media body is too large or could not be read").into_response(),
     };
 
     // store in cache
@@ -250,6 +259,24 @@ pub async fn proxy_image(Extension(_user_id): Extension<i64>,
         bytes,
     )
         .into_response()
+}
+
+pub const MAX_MEDIA_BYTES: usize = 20 * 1024 * 1024;
+
+pub async fn read_media_body(response: reqwest::Response) -> Result<bytes::Bytes, StatusCode> {
+    if response.content_length().is_some_and(|size| size > MAX_MEDIA_BYTES as u64) {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    let mut stream = response.bytes_stream();
+    let mut body = bytes::BytesMut::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| StatusCode::BAD_GATEWAY)?;
+        if chunk.len() > MAX_MEDIA_BYTES.saturating_sub(body.len()) {
+            return Err(StatusCode::PAYLOAD_TOO_LARGE);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body.freeze())
 }
 
 #[cfg(test)]
@@ -348,6 +375,36 @@ mod tests {
             "https://example.com/no-extension",
         ] {
             assert!(!url_has_media_extension(url), "{url} should not be recognized as media by extension");
+        }
+    }
+}
+
+#[cfg(test)]
+mod body_limit_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn chunked_media_is_capped_without_a_content_length() {
+        use axum::{body::Body, routing::get, Router};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new().route("/large", get(|| async {
+            let chunks = futures_util::stream::iter((0..21).map(|_| {
+                Ok::<_, std::convert::Infallible>(bytes::Bytes::from(vec![0; 1024 * 1024]))
+            }));
+            Body::from_stream(chunks)
+        }));
+        let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let response = Client::builder().no_proxy().build().unwrap()
+            .get(format!("http://{addr}/large")).send().await.unwrap();
+        assert_eq!(read_media_body(response).await.unwrap_err(), StatusCode::PAYLOAD_TOO_LARGE);
+        task.abort();
+    }
+
+    #[test]
+    fn literal_ipv6_and_unspecified_targets_are_rejected() {
+        for value in ["http://[::1]/", "http://[::ffff:127.0.0.1]/", "http://0.0.0.0/", "http://localhost./"] {
+            assert_eq!(validate_target(&Url::parse(value).unwrap()), Err(StatusCode::FORBIDDEN));
         }
     }
 }

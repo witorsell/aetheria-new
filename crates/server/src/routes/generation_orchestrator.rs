@@ -37,6 +37,7 @@ pub(crate) fn resolve_provider(provider_type: &str) -> Result<Box<dyn crate::pro
 /// to apply the character's own system-prompt/post-history-instructions
 /// override, the third silently didn't).
 pub(crate) struct PreparedGeneration {
+    pub http_client: reqwest::Client,
     pub provider: Box<dyn crate::provider::ModelProvider>,
     pub api_base_url: String,
     pub api_key: String,
@@ -195,7 +196,9 @@ pub(crate) async fn assemble_generation(
     let provider = resolve_provider(&settings.provider.provider_type)?;
     let sampling = settings.sampling_params();
 
+    let http_client = state.provider_client_for(&settings.provider.provider_type, &settings.provider.api_base_url).await?;
     Ok(PreparedGeneration {
+        http_client,
         provider,
         api_base_url: settings.provider.api_base_url,
         api_key,
@@ -289,7 +292,7 @@ pub(crate) fn run_group_generation(
             };
 
             let mut provider_stream = prepared.provider.stream_completion(
-                state.http_client.clone(),
+                prepared.http_client,
                 prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling,
             ).await;
 
@@ -408,7 +411,7 @@ pub(crate) async fn run_generation(
 
     let provider_stream = prepared
         .provider
-        .stream_completion(state.http_client.clone(), prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
+        .stream_completion(prepared.http_client, prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
         .await;
 
     let writer = state.db.writer.clone();

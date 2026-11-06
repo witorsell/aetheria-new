@@ -63,7 +63,7 @@ pub async fn tree_for_chat(pool: &sqlx::SqlitePool, user_id: i64, chat_id: &str)
     .await?;
 
     let character = sqlx::query_as::<_, crate::models::character::Character>(
-        "SELECT characters.* FROM characters JOIN chats ON chats.character_id = characters.id WHERE chats.id = ? AND chats.user_id = ?"
+        "SELECT characters.* FROM characters JOIN chats ON chats.character_id = characters.id WHERE chats.id = ? AND chats.user_id = ? AND characters.user_id = chats.user_id"
     )
     .bind(chat_id)
     .bind(user_id)

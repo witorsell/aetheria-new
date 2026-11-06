@@ -13,12 +13,16 @@ impl Writer {
         self.dispatch(move |conn| Box::pin(async move {
             let mut tx = conn.begin().await?;
 
-            let avatar_urls: Vec<String> = sqlx::query_scalar(
-                "SELECT avatar_url FROM characters WHERE user_id = ? AND avatar_url IS NOT NULL",
+            let avatars: Vec<(String, String)> = sqlx::query_as(
+                "SELECT id, avatar_url FROM characters WHERE user_id = ? AND avatar_url IS NOT NULL",
             )
             .bind(user_id)
             .fetch_all(&mut *tx)
             .await?;
+
+            let avatar_urls = avatars.into_iter().filter_map(|(id, url)| {
+                crate::uploads::character_filename(&id, &url).map(|_| url.clone())
+            }).collect();
 
             // children before parents; order matters for correctness even
             // though this app doesn't enable sqlite FK enforcement, so a

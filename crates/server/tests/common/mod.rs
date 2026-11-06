@@ -39,6 +39,14 @@ async fn login(app: &axum::Router, username: &str, password: &str) -> String {
 }
 
 pub async fn authed_app() -> (axum::Router, String) {
+    authed_app_with_provider_origins(&[]).await
+}
+
+pub async fn authed_app_for_provider(origin: &str) -> (axum::Router, String) {
+    authed_app_with_provider_origins(&[origin]).await
+}
+
+async fn authed_app_with_provider_origins(origins: &[&str]) -> (axum::Router, String) {
     std::env::set_var(
         "AETHERIA_SESSION_SECRET",
         "test-secret-at-least-64-bytes-long-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -52,7 +60,9 @@ pub async fn authed_app() -> (axum::Router, String) {
         .execute(&db.read_pool)
         .await
         .ok();
-    let app = with_fake_connect_info(server::routes::build_router(server::state::AppState::new(db, true)));
+    let mut state = server::state::AppState::new(db, true);
+    state.provider_network_policy = server::network::ProviderNetworkPolicy::new(origins.iter().copied()).unwrap();
+    let app = with_fake_connect_info(server::routes::build_router(state));
 
     let cookie = login(&app, "testuser", "test-pass-1234").await;
 

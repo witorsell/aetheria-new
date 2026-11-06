@@ -7,12 +7,14 @@ pub mod group_activation;
 #[cfg(feature = "local-embeddings")]
 pub mod local_embedding;
 pub mod memory;
+pub mod network;
 pub mod models;
 pub mod provider;
 pub mod reasoning;
 pub mod routes;
 pub mod state;
 pub mod tokenizer;
+pub mod uploads;
 pub mod vector_memory;
 
 /// resolve a path relative to the project root. checks env var first
@@ -74,6 +76,9 @@ pub async fn bootstrap_user(db: &db::Db, username: &str, password: &str) {
         tracing::info!("users already exist, skipping bootstrap");
         return;
     }
+    assert!(!username.trim().is_empty(), "INITIAL_USERNAME must not be empty on first run");
+    assert!(password.len() >= 12 && password != "password",
+        "set INITIAL_PASSWORD to a unique password of at least 12 characters before first run");
     let hash = auth::hash_password(password);
     db.writer
         .upsert_user(username.to_string(), hash)
@@ -126,5 +131,29 @@ mod tests {
         assert!(bootstrapped.is_some(), "the real user from the first bootstrap must survive a second bootstrap call");
         let someone_else = models::user::find_by_username(&db.read_pool, "someone-else").await.unwrap();
         assert!(someone_else.is_none(), "a second bootstrap call must not create or rename into a new account");
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_password_tests {
+    #[tokio::test]
+    #[should_panic(expected = "set INITIAL_PASSWORD")]
+    async fn first_run_requires_an_explicit_password() {
+        let db = crate::db::connect(":memory:").await;
+        crate::bootstrap_user(&db, "admin", "").await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "set INITIAL_PASSWORD")]
+    async fn first_run_rejects_the_old_default_password() {
+        let db = crate::db::connect(":memory:").await;
+        crate::bootstrap_user(&db, "admin", "password").await;
+    }
+
+    #[tokio::test]
+    async fn existing_credentials_do_not_require_bootstrap_settings() {
+        let db = crate::db::connect(":memory:").await;
+        crate::bootstrap_user(&db, "admin", "unique-initial-password").await;
+        crate::bootstrap_user(&db, "admin", "").await;
     }
 }

@@ -41,7 +41,7 @@ async fn spawn_mock_provider() -> String {
 #[tokio::test]
 async fn generate_streams_the_reply_incrementally_and_persists_it() {
     let mock_base_url = spawn_mock_provider().await;
-    let (app, cookie) = common::authed_app().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
 
     // point settings at the mock provider.
     let settings_body = serde_json::json!({
@@ -209,7 +209,7 @@ async fn drain(response: axum::http::Response<Body>) {
 #[tokio::test]
 async fn regenerate_branches_from_the_given_parent_instead_of_the_last_reply() {
     let mock_base_url = spawn_mock_provider().await;
-    let (app, cookie) = common::authed_app().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
 
     let settings_body = serde_json::json!({
         "api_base_url": mock_base_url,

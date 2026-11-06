@@ -64,7 +64,7 @@ async fn drain(response: axum::http::Response<Body>) -> String {
 #[tokio::test]
 async fn sending_a_message_to_a_list_group_gets_every_member_to_reply_in_order() {
     let mock_base_url = spawn_mock_provider().await;
-    let (app, cookie) = common::authed_app().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
 
     let settings_body = serde_json::json!({
         "api_base_url": mock_base_url, "api_key": "test-key", "model_name": "test-model",
@@ -161,7 +161,7 @@ async fn sending_a_message_to_a_list_group_gets_every_member_to_reply_in_order()
 #[tokio::test]
 async fn regenerating_a_groups_reply_only_rerolls_the_named_member() {
     let mock_base_url = spawn_mock_provider().await;
-    let (app, cookie) = common::authed_app().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
 
     let settings_body = serde_json::json!({
         "api_base_url": mock_base_url, "api_key": "test-key", "model_name": "test-model",
@@ -254,7 +254,7 @@ async fn regenerating_a_groups_reply_only_rerolls_the_named_member() {
 #[tokio::test]
 async fn regenerating_a_non_first_members_reply_names_the_prior_reply_instead_of_treating_it_as_the_user() {
     let mock_base_url = spawn_mock_provider().await;
-    let (app, cookie) = common::authed_app().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
 
     let settings_body = serde_json::json!({
         "api_base_url": mock_base_url, "api_key": "test-key", "model_name": "test-model",
@@ -341,7 +341,7 @@ async fn regenerating_a_non_first_members_reply_names_the_prior_reply_instead_of
 #[tokio::test]
 async fn regenerating_a_groups_reply_without_a_character_id_is_rejected() {
     let mock_base_url = spawn_mock_provider().await;
-    let (app, cookie) = common::authed_app().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
     let settings_body = serde_json::json!({
         "api_base_url": mock_base_url, "api_key": "test-key", "model_name": "test-model",
         "system_prompt": "", "context_limit": 8192, "post_history_instructions": "",

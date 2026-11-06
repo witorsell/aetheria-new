@@ -13,10 +13,8 @@ async fn main() {
     .await;
 
     let username = std::env::var("INITIAL_USERNAME").unwrap_or_else(|_| "admin".to_string());
-    let password = std::env::var("INITIAL_PASSWORD").unwrap_or_else(|_| "password".to_string());
-    if !username.trim().is_empty() && !password.trim().is_empty() {
-        server::bootstrap_user(&db, &username, &password).await;
-    }
+    let password = std::env::var("INITIAL_PASSWORD").unwrap_or_default();
+    server::bootstrap_user(&db, &username, &password).await;
 
     let registration_enabled = std::env::var("ENABLE_REGISTRATION")
         .map(|v| v == "true" || v == "1")

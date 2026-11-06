@@ -78,6 +78,9 @@ pub async fn create(
     Json(input): Json<CreateChatInput>,
 ) -> Result<Json<Chat>, ApiError> {
     validate_chat_title(&input.title)?;
+    crate::models::character::get(&state.db.read_pool, user_id, &character_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Character not found"))?;
     let chat = state
         .db
         .writer
@@ -302,58 +305,7 @@ pub async fn add_member(
     Path(chat_id): Path<String>,
     Json(input): Json<AddChatMemberInput>,
 ) -> Result<Json<Chat>, ApiError> {
-    let chat = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Chat not found"))?;
-
-    let character = crate::models::character::get(&state.db.read_pool, user_id, &input.character_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Character not found"))?;
-
-    if let Some(group_id) = chat.group_id.clone() {
-        let mut members: Vec<(String, bool)> = crate::models::group::list_members(&state.db.read_pool, &group_id)
-            .await?
-            .into_iter()
-            .map(|m| (m.character_id, m.disabled))
-            .collect();
-        if members.iter().any(|(id, _)| id == &input.character_id) {
-            return Err(ApiError::conflict("Character is already a member of this group"));
-        }
-        members.push((input.character_id, false));
-        state.db.writer.set_group_members(user_id, group_id, members)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "failed to set group members");
-                ApiError::internal("Failed to set group members")
-            })?;
-    } else {
-        let existing_character_id = chat.character_id.clone().ok_or_else(|| {
-            ApiError::unprocessable("Chat has no character and no group")
-        })?;
-        if existing_character_id == input.character_id {
-            return Err(ApiError::conflict("Character is already in this chat"));
-        }
-        let existing_character = crate::models::character::get(&state.db.read_pool, user_id, &existing_character_id)
-            .await?
-            .ok_or_else(|| ApiError::not_found("Existing character not found"))?;
-
-        state.db.writer.convert_chat_to_group_with_new_member(
-            user_id,
-            chat_id.clone(),
-            existing_character_id,
-            input.character_id,
-            format!("{} & {}", existing_character.name, character.name),
-        ).await
-        .map_err(|e| {
-            tracing::error!(error = %e, "failed to convert chat to group");
-            ApiError::internal("Failed to convert chat to group")
-        })?;
-    }
-
-    let updated = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Chat not found after update"))?;
-    Ok(Json(updated))
+    change_member(&state, user_id, chat_id, input.character_id, true).await
 }
 
 pub async fn remove_member(
@@ -361,49 +313,19 @@ pub async fn remove_member(
     State(state): State<AppState>,
     Path((chat_id, character_id)): Path<(String, String)>,
 ) -> Result<Json<Chat>, ApiError> {
-    let chat = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Chat not found"))?;
-    let group_id = chat.group_id.clone().ok_or_else(|| {
-        ApiError::unprocessable("Chat has no group")
-    })?;
+    change_member(&state, user_id, chat_id, character_id, false).await
+}
 
-    let members = crate::models::group::list_members(&state.db.read_pool, &group_id).await?;
-    let remaining: Vec<(String, bool)> = members
-        .into_iter()
-        .filter(|m| m.character_id != character_id)
-        .map(|m| (m.character_id, m.disabled))
-        .collect();
-
-    if remaining.is_empty() {
-        return Err(ApiError::unprocessable("Cannot remove the last member from a group chat"));
-    }
-
-    if remaining.len() == 1 {
-        let last_character_id = remaining[0].0.clone();
-        state.db.writer.convert_chat_to_direct(user_id, chat_id.clone(), last_character_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "failed to convert chat to direct");
-                ApiError::internal("Failed to convert chat to direct")
-            })?;
-        state.db.writer.delete_group(user_id, group_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "failed to delete group");
-                ApiError::internal("Failed to delete group")
-            })?;
-    } else {
-        state.db.writer.set_group_members(user_id, group_id, remaining)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "failed to set group members");
-                ApiError::internal("Failed to set group members")
-            })?;
-    }
-
-    let updated = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Chat not found after update"))?;
-    Ok(Json(updated))
+async fn change_member(
+    state: &AppState, user_id: i64, chat_id: String, character_id: String, add: bool,
+) -> Result<Json<Chat>, ApiError> {
+    state.db.writer.change_chat_member(user_id, chat_id.clone(), character_id, add)
+        .await.map_err(|error| match error {
+            sqlx::Error::RowNotFound => ApiError::not_found("Chat or character not found"),
+            sqlx::Error::Protocol(message) if add => ApiError::conflict(message),
+            sqlx::Error::Protocol(message) => ApiError::unprocessable(message),
+            other => ApiError::from_sqlx(other),
+        })?;
+    crate::models::chat::get(&state.db.read_pool, user_id, &chat_id).await?
+        .map(Json).ok_or_else(|| ApiError::not_found("Chat not found"))
 }

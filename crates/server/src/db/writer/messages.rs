@@ -10,6 +10,8 @@ impl Writer {
         content: String,
     ) -> sqlx::Result<crate::models::message::Message> {
         self.dispatch(move |conn| Box::pin(async move {
+            let mut tx = conn.begin().await?;
+            validate_message_parent(&mut tx, user_id, &chat_id, parent_id.as_deref()).await?;
             let id = uuid::Uuid::new_v4().to_string();
             let now = chrono_now_millis();
             sqlx::query(
@@ -22,9 +24,10 @@ impl Writer {
             .bind(&role)
             .bind(&content)
             .bind(now)
-            .execute(&mut *conn)
-            .await
-            .map(|_| crate::models::message::Message {
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(crate::models::message::Message {
                 user_id,
                 id,
                 chat_id,
@@ -53,6 +56,8 @@ impl Writer {
         character_id: Option<String>,
     ) -> sqlx::Result<crate::models::message::Message> {
         self.dispatch(move |conn| Box::pin(async move {
+            let mut tx = conn.begin().await?;
+            validate_message_parent(&mut tx, user_id, &chat_id, parent_id.as_deref()).await?;
             let id = uuid::Uuid::new_v4().to_string();
             let now = chrono_now_millis();
             sqlx::query(
@@ -69,9 +74,10 @@ impl Writer {
             .bind(prompt_tokens)
             .bind(context_limit)
             .bind(&character_id)
-            .execute(&mut *conn)
-            .await
-            .map(|_| crate::models::message::Message {
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(crate::models::message::Message {
                 user_id,
                 id,
                 chat_id,
@@ -99,6 +105,8 @@ impl Writer {
         context_limit: i64,
     ) -> sqlx::Result<crate::models::message::Message> {
         self.dispatch(move |conn| Box::pin(async move {
+            let mut tx = conn.begin().await?;
+            validate_message_parent(&mut tx, user_id, &chat_id, parent_id.as_deref()).await?;
             let id = uuid::Uuid::new_v4().to_string();
             let now = chrono_now_millis();
             sqlx::query(
@@ -114,9 +122,10 @@ impl Writer {
             .bind(&raw_prompt)
             .bind(prompt_tokens)
             .bind(context_limit)
-            .execute(&mut *conn)
-            .await
-            .map(|_| crate::models::message::Message {
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            Ok(crate::models::message::Message {
                 user_id,
                 id,
                 chat_id,
@@ -311,6 +320,21 @@ async fn invalidate_summary_if_already_folded_in(
             .bind(user_id)
             .execute(&mut **tx)
             .await?;
+    }
+    Ok(())
+}
+
+async fn validate_message_parent(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: i64,
+    chat_id: &str,
+    parent_id: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("SELECT 1 FROM chats WHERE id = ? AND user_id = ?")
+        .bind(chat_id).bind(user_id).fetch_one(&mut **tx).await?;
+    if let Some(parent_id) = parent_id {
+        sqlx::query("SELECT 1 FROM messages WHERE id = ? AND chat_id = ? AND user_id = ? AND deleted = 0")
+            .bind(parent_id).bind(chat_id).bind(user_id).fetch_one(&mut **tx).await?;
     }
     Ok(())
 }

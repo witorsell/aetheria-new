@@ -175,19 +175,20 @@ See `.env.example` for a template. Required:
 | `AETHERIA_SESSION_SECRET` | Cookie encryption key (>= 64 random characters) |
 | `AETHERIA_ENCRYPTION_KEY` | AES-256 key for encrypted API keys (exactly 32 bytes) |
 
-Optional (on a fresh install, at least one onboarding method is needed, either bootstrapping an initial account or setting `ENABLE_REGISTRATION=true`):
+A fresh install requires `INITIAL_PASSWORD` with at least 12 characters. The installer generates a unique password and prints it once. Existing accounts are not changed by bootstrap settings on restart.
 
 | Variable | Default | Description |
 |---|---|---|
-| `INITIAL_USERNAME` / `INITIAL_PASSWORD` | `admin` / `password` | Bootstrap an initial user on first startup |
+| `INITIAL_USERNAME` / `INITIAL_PASSWORD` | `admin` / required on first run | Bootstrap an initial user on first startup |
 | `ENABLE_REGISTRATION` | `false` | Set to `true` to allow self-registration at `/register` |
 | `AETHERIA_BIND` | `127.0.0.1:4310` | IP and port to bind server listener |
 | `AETHERIA_DOMAIN` | `yourdomain.com` | Domain name used in Nginx proxy configuration |
 | `MAX_UPLOAD_SIZE_MB` | `25` | Max body/upload size limit in megabytes |
 | `AETHERIA_GENERATE_BURST` | `20.0` | Max burst capacity for generation rate limit per user |
 | `AETHERIA_GENERATE_PER_SEC` | `0.5` | Token refill rate per second for generation rate limiter (e.g. 30/min) |
-| `AETHERIA_IMAGE_CACHE_MAX_CAPACITY` | `500` | Max item capacity for cached proxy images in moka cache |
+| `AETHERIA_IMAGE_CACHE_MAX_BYTES` | `134217728` | Byte budget for cached proxy media; each response is capped at 20 MiB, with at most eight concurrent fetches |
 | `AETHERIA_IMAGE_CACHE_TTL_SECS` | `3600` | Time-to-live in seconds for cached proxy images |
+| `AETHERIA_PROVIDER_ALLOWED_ORIGINS` | empty | Comma-separated exact origins allowed to reach private provider addresses, such as `http://127.0.0.1:5001`. Applies to generation, summaries, model lists, and remote embeddings. Redirects are not followed. |
 
 ## Getting started
 
@@ -280,3 +281,5 @@ chmod +x deploy/generate-nginx-config.sh
 ```
 
 This keeps your Nginx proxy target, upload limits, and domain name in sync with your `.env` configuration without requiring separate manual edits.
+
+Upload files are served through the application with an owner check. Keep `/uploads/` behind the backend proxy; do not add a direct nginx filesystem alias. Upgrading clears cached vector memory once so it can be rebuilt from current message text.

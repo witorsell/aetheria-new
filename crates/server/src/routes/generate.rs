@@ -31,7 +31,10 @@ pub async fn generate(Extension(user_id): Extension<i64>,
         .writer
         .create_message(user_id, chat_id.clone(), parent_id, Role::User.to_string(), input.content)
         .await
-        .map_err(|_| crate::error::ApiError::internal("Failed to create message"))?;
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => crate::error::ApiError::not_found("Chat or parent message not found"),
+            other => crate::error::ApiError::from_sqlx(other),
+        })?;
 
     run_generation(state, user_id, chat_id, Some(message.id)).await
 }
@@ -138,7 +141,7 @@ pub async fn continue_generation(Extension(user_id): Extension<i64>,
 
     let provider_stream = prepared
         .provider
-        .stream_completion(state.http_client.clone(), prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
+        .stream_completion(prepared.http_client, prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
         .await;
 
     let writer = state.db.writer.clone();
@@ -240,7 +243,7 @@ pub async fn respond_as_user(
 
     let provider_stream = prepared
         .provider
-        .stream_completion(state.http_client.clone(), prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
+        .stream_completion(prepared.http_client, prepared.api_base_url, prepared.api_key, prepared.model_name, prepared.messages, prepared.sampling)
         .await;
 
     let writer = state.db.writer.clone();
@@ -407,7 +410,8 @@ pub async fn generate_character_field(Extension(user_id): Extension<i64>,
     let provider = resolve_provider(&settings.provider.provider_type)?;
 
     let sampling = settings.sampling_params();
-    let provider_stream = provider.stream_completion(state.http_client.clone(), settings.provider.api_base_url, api_key, settings.provider.model_name, messages, sampling).await;
+    let http_client = state.provider_client_for(&settings.provider.provider_type, &settings.provider.api_base_url).await?;
+    let provider_stream = provider.stream_completion(http_client, settings.provider.api_base_url, api_key, settings.provider.model_name, messages, sampling).await;
 
     let sse_stream = provider_stream.map(|item| match item {
         Ok(delta) => Ok(Event::default().data(delta)),

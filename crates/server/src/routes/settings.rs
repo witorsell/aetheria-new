@@ -154,7 +154,8 @@ pub async fn list_models(
     } else {
         format!("{}/models", view.provider.api_base_url.trim_end_matches('/'))
     };
-    let mut request = state.http_client.get(url);
+    let client = state.provider_client(&url).await?;
+    let mut request = client.get(url);
     if !api_key.is_empty() {
         request = request.bearer_auth(api_key);
     }

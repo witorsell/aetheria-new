@@ -44,6 +44,11 @@ pub async fn maybe_index_chat(state: &AppState, user_id: i64, chat_id: &str) {
         _ => return,
     };
 
+    let client = match state.embedding_client(&cfg).await {
+        Ok(client) => client,
+        Err(_) => return,
+    };
+
     let tree = match crate::models::message::tree_for_chat(&state.db.read_pool, user_id, chat_id).await {
         Ok(t) => t,
         Err(_) => return,
@@ -65,7 +70,7 @@ pub async fn maybe_index_chat(state: &AppState, user_id: i64, chat_id: &str) {
 
     for batch in pending.chunks(INDEX_BATCH_SIZE) {
         let texts: Vec<String> = batch.iter().map(|m| thinking_stripped(&m.role, &m.content)).collect();
-        let vectors = match embedding::embed(&state.http_client, &cfg, &texts, crate::embedding::EmbedMode::Document).await {
+        let vectors = match embedding::embed(&client, &cfg, &texts, crate::embedding::EmbedMode::Document).await {
             Ok(v) => v,
             Err(_) => return,
         };
@@ -73,7 +78,7 @@ pub async fn maybe_index_chat(state: &AppState, user_id: i64, chat_id: &str) {
             let _ = state
                 .db
                 .writer
-                .insert_memory_chunk(user_id, chat_id.to_string(), message.id.clone(), message.role.clone(), text, embedding::pack(&vector))
+                .insert_memory_chunk(user_id, chat_id.to_string(), message.id.clone(), message.role.clone(), text, message.content.clone(), embedding::pack(&vector))
                 .await;
         }
     }
@@ -95,6 +100,11 @@ pub async fn retrieve_relevant_context(
     let cfg = match crate::models::settings::get_embedding_config(&state.db.read_pool, user_id, &state.encryption_key).await {
         Ok(Some(c)) => c,
         _ => return String::new(),
+    };
+
+    let client = match state.embedding_client(&cfg).await {
+        Ok(client) => client,
+        Err(_) => return String::new(),
     };
 
     let protected = messages_still_in_context(history, context_limit);
@@ -125,7 +135,7 @@ pub async fn retrieve_relevant_context(
         return String::new();
     }
 
-    let query_vector = match embedding::embed(&state.http_client, &cfg, &[query_text], crate::embedding::EmbedMode::Query).await {
+    let query_vector = match embedding::embed(&client, &cfg, &[query_text], crate::embedding::EmbedMode::Query).await {
         Ok(mut v) if !v.is_empty() => v.remove(0),
         _ => return String::new(),
     };

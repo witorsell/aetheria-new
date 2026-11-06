@@ -402,25 +402,21 @@ pub async fn export_character(
     if is_png {
         let mut loaded_img = None;
 
-        if let Some(p) = &character.avatar_path {
-            if !p.is_empty() {
-                loaded_img = image::open(p).ok();
-            }
-        }
-
         if loaded_img.is_none() {
             if let Some(u) = &character.avatar_url {
                 if u.starts_with("/uploads/") {
-                    // avatar_url carries a `?v=` cache-busting query string
-                    // (see characters::upload_avatar), which isn't part of
-                    // the actual file on disk.
-                    let local_path = u.split('?').next().unwrap_or(u).trim_start_matches('/');
-                    loaded_img = image::open(local_path).ok();
+                    if let Some(filename) = u.strip_prefix("/uploads/").and_then(|path| path.split('?').next()) {
+                        if crate::uploads::is_owned(&state.db.read_pool, user_id, filename).await.unwrap_or(false) {
+                            loaded_img = image::open(crate::auth::uploads_dir().join(filename)).ok();
+                        }
+                    }
                 } else if u.starts_with("http") {
                     // reuse the same SSRF protections as the image proxy
-                    if let Ok(resp) = crate::routes::proxy::proxy_fetch_with_checks(&state.proxy_client, u).await {
-                        if let Ok(bytes) = resp.bytes().await {
-                            loaded_img = image::load_from_memory(&bytes).ok();
+                    if let Ok(_permit) = state.proxy_fetch_slots.try_acquire() {
+                        if let Ok(resp) = crate::routes::proxy::proxy_fetch_with_checks(&state.proxy_client, u).await {
+                            if let Ok(bytes) = crate::routes::proxy::read_media_body(resp).await {
+                                loaded_img = image::load_from_memory(&bytes).ok();
+                            }
                         }
                     }
                 }
