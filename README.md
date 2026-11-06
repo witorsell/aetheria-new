@@ -38,25 +38,6 @@ So here we are.
 Last 7 days only. Older entries get trimmed off.
 - Replies stream again. The provider client had stopped using the server's proxy, so requests to providers that can't be reached directly hung (Nov 6)
 - Chats no longer jump to a stray one-line branch and hide the real conversation. When no swipe is picked, the branch with a reply wins over an unanswered line, even after the end of the real branch was deleted (Nov 6)
-- Personas can now actually be edited (name/description) from settings instead of only created and deleted; added an opt-in toggle to make `{{user}}` always resolve to your display name instead of the active persona's name (Aug 15)
-- Chat/card images (avatars in messages, `![img]` markdown, raw `<img>` in cards) now retry once the tab regains focus if their load failed while backgrounded - a plain `<img>` never retried on its own, so a chat image could go permanently broken until a full page reload (Aug 15)
-- Re-syncing a character from a file was merging in alternate greetings instead of replacing them, so re-syncing an updated card just piled duplicates on top of the old ones; it's now a full replace like the rest of a sync (Aug 15)
-- A backgrounded mobile tab (or a dead cellular connection) could leave a chat reply stuck "generating" forever with no error and no way to recover but reloading; streaming requests now carry an idle watchdog that aborts and reports an error once a connection goes fully silent (Aug 15)
-- Image/video proxy reuses one pooled HTTP client instead of rebuilding one per request, checks the cache before any network call, and now only serves back actual image/video content instead of whatever a target URL happens to return (Aug 15)
-- Character export was silently dropping creator notes and any linked lorebook, and printing everything as one minified, alphabetically-sorted line; both now round-trip through export and the file comes out pretty-printed with name first (Aug 15)
-- Library search box replaces the tag-filter button row, matching characters by name and tag together instead of filtering by one tag at a time (Aug 15)
-- Character editor can re-import a card file onto an existing character to sync fields, tags, and greetings in place, instead of deleting and re-importing from scratch (Aug 15)
-- Tag import now batches into one request instead of one round-trip per tag, tags render as compact chips in the editor instead of full rows, and deleting a character cleans up any tag nothing else references (Aug 15)
-- Fixed generation state (streaming reply, typing indicator, send-blocked) leaking between chats when you navigate away mid-stream; continue and respond-as-me generation now run in a detached task like send/regenerate already did, so they survive navigating away instead of dying with the request (Aug 15)
-- Fixed streamed replies corrupting multi-byte characters (accents, CJK, emoji) split across a network chunk boundary; wrapped settings and lorebook writes in real transactions instead of sequential statements that could partially fail (Aug 15)
-- Character tags: picker, list filtering, profile badges, a bulk-tag endpoint, case-insensitive per-user-unique names, real deletion (not just untick), carried through card import/export (Aug 15)
-- Mapped more SillyTavern theme fields onto tokens (chat/message backgrounds, italic/underline text, shadow color) and exposed them in the theme editor (Aug 15)
-- Sanitized markdown link hrefs the same way raw `<a>` tags already were (Aug 15)
-- Mobile fixes: editor tabs wrap instead of overflowing off-screen, persona/preset rows no longer overflow, danger zone moved to the bottom of settings (Aug 14-15)
-- Danger zone in system settings: export, import, and delete-everything (Aug 13)
-- Persona library: multiple named personas with descriptions, switchable from settings, replacing the old single global persona field (Aug 14)
-- One-click install script, and `chat.rs`/`SettingsView` split into smaller focused modules for easier maintenance going forward (Aug 13)
-- Full theme system: SillyTavern-style token editor with instant live preview, import/export (including direct SillyTavern UI theme JSON import), plus a redesigned default look and a mascot (Aug 12)
 
 ## Stuff that works
 
