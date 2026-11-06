@@ -7,7 +7,9 @@ pub fn overlay_keyboard(open: Signal<bool>, close: Callback<()>, selector: &'sta
     Effect::new(move |_| {
         let document = document();
         if open.get() {
-            *saved.borrow_mut() = document.active_element().and_then(|e| e.dyn_into().ok());
+            if saved.borrow().is_none() {
+                *saved.borrow_mut() = document.active_element().and_then(|e| e.dyn_into().ok());
+            }
             leptos::task::spawn_local(async move {
                 gloo_timers::future::TimeoutFuture::new(0).await;
                 if open.get_untracked() {

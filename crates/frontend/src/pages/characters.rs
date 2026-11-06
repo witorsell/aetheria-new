@@ -16,6 +16,7 @@ pub fn CharactersPage() -> impl IntoView {
         let input: web_sys::HtmlInputElement = event_target(&ev);
         if let Some(files) = input.files() {
             if let Some(file) = files.get(0_u32) {
+                input.set_value("");
                 set_importing.set(true);
                 set_error.set(None);
                 spawn_local(async move {
@@ -42,11 +43,11 @@ pub fn CharactersPage() -> impl IntoView {
             <div class="collection-toolbar">
                 <input type="search" aria-label="search characters" placeholder="search by name or tag"
                     prop:value=search on:input=move |ev| set_search.set(event_target_value(&ev)) />
+                <input type="file" id="import-upload" class="file-upload-input" accept=".png,.json"
+                    disabled=move || importing.get() on:change=on_import />
                 <label class="file-upload-label" for="import-upload">
                     {move || if importing.get() { "importing…" } else { "import png / json" }}
                 </label>
-                <input type="file" id="import-upload" class="file-upload-input" accept=".png,.json"
-                    disabled=move || importing.get() on:change=on_import />
             </div>
             {move || error.get().map(|e| view! { <p class="error" role="alert">{e}</p> })}
             <CharacterList filter_query=Signal::derive(move || search.get()) />

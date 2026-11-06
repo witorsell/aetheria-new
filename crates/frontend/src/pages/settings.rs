@@ -423,9 +423,9 @@ pub fn SettingsPage() -> impl IntoView {
             <form class="settings-form" on:submit=on_submit style="display: flex; flex-direction: column; gap: 2.5rem;">
                 
                 <div class="field" style="margin: 0;">
-                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Provider Type"</label>
+                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-provider">"Provider Type"</label>
                     <div style="position: relative; width: 100%;">
-                        <select
+                        <select id="settings-provider"
                             prop:value=provider_type
                             on:change=move |ev| set_provider_type.set(event_target_value(&ev))
                             style="appearance: none; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: #fff; font-family: var(--font-body); padding: 0.75rem 1rem; font-size: 1rem; outline: none; width: 100%; transition: all 0.3s ease; cursor: pointer; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"
@@ -488,9 +488,9 @@ pub fn SettingsPage() -> impl IntoView {
                 </div>
                 
                 <div class="field" style="margin: 0;">
-                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Model Name"</label>
+                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-model-name">"Model Name"</label>
                     <div class="model-name-row" style="display: flex; gap: 1rem; align-items: flex-end;">
-                        <input
+                        <input id="settings-model-name"
                             type="text"
                             placeholder="gpt-4o-mini"
                             prop:value=model_name
@@ -573,9 +573,9 @@ pub fn SettingsPage() -> impl IntoView {
                 </div>
 
                 <div class="field" style="margin: 0;">
-                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Summarization Provider Type"</label>
+                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-summary-provider">"Summarization Provider Type"</label>
                     <div style="position: relative; width: 100%;">
-                        <select
+                        <select id="settings-summary-provider"
                             prop:value=summary_provider_type
                             on:change=move |ev| set_summary_provider_type.set(event_target_value(&ev))
                             style="appearance: none; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: #fff; font-family: var(--font-body); padding: 0.75rem 1rem; font-size: 1rem; outline: none; width: 100%; transition: all 0.3s ease; cursor: pointer; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"
@@ -673,9 +673,9 @@ pub fn SettingsPage() -> impl IntoView {
                 </div>
 
                 <div class="field" style="margin: 0;">
-                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Embedding Source"</label>
+                    <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-embedding-source">"Embedding Source"</label>
                     <div style="position: relative; width: 100%;">
-                        <select
+                        <select id="settings-embedding-source"
                             prop:value=embedding_source
                             on:change=move |ev| set_embedding_source.set(event_target_value(&ev))
                             style="appearance: none; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: #fff; font-family: var(--font-body); padding: 0.75rem 1rem; font-size: 1rem; outline: none; width: 100%; transition: all 0.3s ease; cursor: pointer; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"
@@ -892,9 +892,9 @@ pub fn SettingsPage() -> impl IntoView {
                     </div>
 
                     <div class="field" style="margin: 0; flex: 1; min-width: 200px;">
-                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">"Reasoning Effort"</label>
+                        <label style="color: var(--color-text-muted); font-family: monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;" for="settings-reasoning">"Reasoning Effort"</label>
                         <div style="position: relative; width: 100%;">
-                            <select
+                            <select id="settings-reasoning"
                                 prop:value=reasoning_effort
                                 on:change=move |ev| set_reasoning_effort.set(event_target_value(&ev))
                                 style="appearance: none; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; color: #fff; font-family: var(--font-body); padding: 0.75rem 1rem; font-size: 1rem; outline: none; width: 100%; transition: all 0.3s ease; cursor: pointer; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);"

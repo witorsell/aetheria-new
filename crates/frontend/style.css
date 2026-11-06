@@ -2161,3 +2161,9 @@ button.primary:hover:not(:disabled), .btn.primary:hover { background: var(--colo
   .modal-box { max-height: 85dvh; overflow-y: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .loading-line { animation: none; } }
+
+@media (max-width: 768px) {
+  .model-name-row { flex-wrap: wrap; }
+  .model-name-row input { min-width: 0; width: 100%; flex-basis: 100%; }
+  .settings-page .field { min-width: 0; max-width: 100%; }
+}
