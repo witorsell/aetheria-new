@@ -42,6 +42,7 @@ pub fn overlay_keyboard(open: Signal<bool>, close: Callback<()>, selector: &'sta
             }
         }
     });
+    let previous = send_wrapper::SendWrapper::new(previous);
     on_cleanup(move || {
         handle.remove();
         if let Some(element) = previous.borrow_mut().take() { let _ = element.focus(); }

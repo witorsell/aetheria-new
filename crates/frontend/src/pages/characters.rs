@@ -1,4 +1,3 @@
-use crate::api::{self};
 use crate::components::character_list::{CharacterList, CharactersVersion};
 use leptos::prelude::*;
 use leptos::task::spawn_local;

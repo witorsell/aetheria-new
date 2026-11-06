@@ -1429,6 +1429,7 @@ dependencies = [
  "leptos",
  "leptos_router",
  "pulldown-cmark",
+ "send_wrapper",
  "serde",
  "serde_json",
  "urlencoding",
