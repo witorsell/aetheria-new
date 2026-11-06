@@ -50,6 +50,11 @@ pub async fn load_tree(id: &str, allow_fallback: bool) -> Option<LoadedChat> {
                 msgs.insert(msg.id.clone(), msg.clone());
                 prev_id = Some(msg.id.clone());
             }
+            // the server keeps the newest messages of a long chat, so the
+            // first one may not be the real root
+            if root_id.is_none() {
+                root_id = branch_data.first().map(|m| m.id.clone());
+            }
             t.root_id = root_id;
             t.messages = msgs;
             t

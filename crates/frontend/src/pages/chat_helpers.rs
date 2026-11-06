@@ -77,10 +77,48 @@ pub(super) fn RawPromptPanel(
 /// walk the active branch from root to leaf, following the selected child at
 /// each node. if no selection is recorded for a node, follows the last child
 /// (most recent). returns an ordered list of nodes.
+/// how each subtree ranks when no swipe picked a child: one holding a reply
+/// beats one that is only an unanswered line, then the newest message wins.
+/// without the first part, a stray line that is newer than what is left of
+/// the real branch (after its last messages were deleted) takes over the view.
+fn newest_in_subtree(tree: &crate::api::MessageTree) -> HashMap<String, (bool, i64)> {
+    let mut rows: Vec<&crate::api::MessageNode> = tree.messages.values().collect();
+    rows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let mut newest: HashMap<String, i64> = HashMap::new();
+    let mut answered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for node in rows {
+        let mut cur = Some(node.id.as_str());
+        while let Some(id) = cur {
+            if newest.contains_key(id) {
+                break;
+            }
+            newest.insert(id.to_string(), node.created_at);
+            cur = tree.messages.get(id).and_then(|n| n.parent_id.as_deref());
+        }
+        if node.role == "assistant" {
+            let mut cur = Some(node.id.as_str());
+            while let Some(id) = cur {
+                if !answered.insert(id.to_string()) {
+                    break;
+                }
+                cur = tree.messages.get(id).and_then(|n| n.parent_id.as_deref());
+            }
+        }
+    }
+    newest
+        .into_iter()
+        .map(|(id, t)| {
+            let a = answered.contains(&id);
+            (id, (a, t))
+        })
+        .collect()
+}
+
 pub(super) fn walk_active_branch(
     tree: &crate::api::MessageTree,
     selected_children: &HashMap<String, String>,
 ) -> Vec<crate::api::MessageNode> {
+    let newest = newest_in_subtree(tree);
     let mut branch = Vec::new();
     let mut current_id = match &tree.root_id {
         Some(id) => id.clone(),
@@ -102,7 +140,15 @@ pub(super) fn walk_active_branch(
         let chosen = selected_children.get(&node.id).filter(|id| tree.messages.contains_key(id.as_str()));
         current_id = chosen
             .cloned()
-            .or_else(|| node.children.iter().rev().find(|id| tree.messages.contains_key(id.as_str())).cloned())
+            .or_else(|| {
+                // no swipe picked: follow the child whose subtree holds the
+                // newest message, so a dead-end sibling never hides the chat
+                node.children
+                    .iter()
+                    .filter(|id| tree.messages.contains_key(id.as_str()))
+                    .max_by_key(|id| newest.get(id.as_str()).copied().unwrap_or((false, 0)))
+                    .cloned()
+            })
             .unwrap_or_default();
         if current_id.is_empty() {
             break;
@@ -158,6 +204,35 @@ mod tests {
         selected.insert("b".to_string(), "gone".to_string());
         let ids: Vec<_> = walk_active_branch(&tree, &selected).into_iter().map(|n| n.id).collect();
         assert_eq!(ids, vec!["a", "b", "d"]);
+    }
+
+    #[test]
+    fn a_newer_dead_end_sibling_does_not_hide_the_long_branch() {
+        let mut stray = node("stray", Some("a"), &[]);
+        stray.created_at = 6;
+        let mut long = node("long", Some("a"), &["l2"]);
+        long.created_at = 2;
+        let mut l2 = node("l2", Some("long"), &[]);
+        l2.created_at = 9;
+        let mut root = node("a", None, &["long", "stray"]);
+        root.created_at = 1;
+        let tree = tree("a", vec![root, long, l2, stray]);
+        let ids: Vec<_> = walk_active_branch(&tree, &HashMap::new()).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["a", "long", "l2"]);
+    }
+
+    #[test]
+    fn an_unanswered_line_newer_than_the_branch_tail_stays_hidden() {
+        let mut root = node("a", None, &["long", "stray"]);
+        root.created_at = 1;
+        let mut long = node("long", Some("a"), &[]);
+        long.created_at = 2;
+        let mut stray = node("stray", Some("a"), &[]);
+        stray.created_at = 8;
+        stray.role = "user".to_string();
+        let tree = tree("a", vec![root, long, stray]);
+        let ids: Vec<_> = walk_active_branch(&tree, &HashMap::new()).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["a", "long"]);
     }
 
     #[test]

@@ -137,35 +137,97 @@ pub fn strip_raw_prompts(tree: &mut MessageTree) {
     }
 }
 
+/// the active branch of a chat, root first, picked with the same rule as
+/// `active_branch`. a chat longer than `limit` keeps its newest `limit`
+/// messages, not its oldest ones.
 pub async fn active_branch_for_chat(pool: &sqlx::SqlitePool, user_id: i64, chat_id: &str, limit: Option<i64>) -> sqlx::Result<Vec<Message>> {
-    let limit_val = limit.unwrap_or(100);
-    sqlx::query_as::<_, Message>(
-        "WITH RECURSIVE active_branch(id, parent_id, depth) AS (
-            SELECT id, parent_id, 0 FROM messages
-            WHERE chat_id = ? AND user_id = ? AND parent_id IS NULL AND deleted = 0
-            UNION ALL
-            SELECT m.id, m.parent_id, ab.depth + 1 FROM messages m
-            JOIN active_branch ab ON m.parent_id = ab.id AND m.deleted = 0
-            WHERE m.id = (
-                SELECT id FROM messages 
-                WHERE parent_id = ab.id AND deleted = 0 
-                ORDER BY created_at DESC LIMIT 1
-            )
-        )
-        SELECT messages.* FROM messages
-        JOIN active_branch USING (id)
-        ORDER BY messages.created_at ASC
-        LIMIT ?"
+    let limit_val = limit.unwrap_or(100).max(0) as usize;
+    let rows = sqlx::query_as::<_, Message>(
+        "SELECT * FROM messages WHERE chat_id = ? AND user_id = ? AND deleted = 0 ORDER BY created_at ASC",
     )
     .bind(chat_id)
     .bind(user_id)
-    .bind(limit_val)
     .fetch_all(pool)
-    .await
+    .await?;
+    let rank = rank_subtrees(
+        rows.iter()
+            .map(|m| (m.id.as_str(), m.parent_id.as_deref(), m.role == "assistant", m.created_at)),
+    );
+    let mut children: HashMap<&str, Vec<&Message>> = HashMap::new();
+    let mut root: Option<&Message> = None;
+    for m in &rows {
+        match m.parent_id.as_deref() {
+            Some(pid) => children.entry(pid).or_default().push(m),
+            None => root = Some(m),
+        }
+    }
+    let mut branch: Vec<Message> = Vec::new();
+    let mut cur = root;
+    while let Some(m) = cur {
+        branch.push(m.clone());
+        cur = children.get(m.id.as_str()).and_then(|kids| {
+            kids.iter()
+                .copied()
+                .max_by_key(|k| rank.get(k.id.as_str()).copied().unwrap_or((false, 0)))
+        });
+    }
+    if branch.len() > limit_val {
+        branch.drain(..branch.len() - limit_val);
+    }
+    Ok(branch)
 }
 
-// root to leaf, following the last (most recent) child at each node
+/// how a subtree ranks when the branch has to be picked without a stored
+/// choice: a subtree holding a reply beats one that is only an unanswered
+/// line, then the one with the newest message wins. a stray line that never
+/// got a reply (or whose reply was deleted) must not outrank the branch that
+/// actually holds the conversation, even when it is newer than what is left
+/// of that branch after its last messages were deleted.
+pub(crate) fn rank_subtrees<'a>(
+    items: impl Iterator<Item = (&'a str, Option<&'a str>, bool, i64)>,
+) -> HashMap<String, (bool, i64)> {
+    let mut rows: Vec<(&str, Option<&str>, bool, i64)> = items.collect();
+    let parent_of: HashMap<&str, Option<&str>> = rows.iter().map(|r| (r.0, r.1)).collect();
+    rows.sort_by(|a, b| b.3.cmp(&a.3));
+    let mut newest: HashMap<&str, i64> = HashMap::new();
+    let mut answered: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for &(id, _, is_reply, created_at) in &rows {
+        let mut cur = Some(id);
+        while let Some(n) = cur {
+            if newest.contains_key(n) {
+                break;
+            }
+            newest.insert(n, created_at);
+            cur = parent_of.get(n).copied().flatten();
+        }
+        if is_reply {
+            let mut cur = Some(id);
+            while let Some(n) = cur {
+                if !answered.insert(n) {
+                    break;
+                }
+                cur = parent_of.get(n).copied().flatten();
+            }
+        }
+    }
+    newest
+        .into_iter()
+        .map(|(id, t)| (id.to_string(), (answered.contains(id), t)))
+        .collect()
+}
+
+fn newest_in_subtree(tree: &MessageTree) -> HashMap<String, (bool, i64)> {
+    rank_subtrees(
+        tree.messages
+            .values()
+            .map(|n| (n.id.as_str(), n.parent_id.as_deref(), n.role == "assistant", n.created_at)),
+    )
+}
+
+// root to leaf, following at each node the child whose subtree holds the
+// newest message
 pub fn active_branch(tree: &MessageTree) -> Vec<MessageNode> {
+    let newest = newest_in_subtree(tree);
     let mut branch = Vec::new();
     let mut current_id = match &tree.root_id {
         Some(id) => id.clone(),
@@ -186,7 +248,8 @@ pub fn active_branch(tree: &MessageTree) -> Vec<MessageNode> {
             .last()
             .expect("just pushed a node above, so branch is non-empty")
             .children
-            .last()
+            .iter()
+            .max_by_key(|id| newest.get(id.as_str()).copied().unwrap_or((false, 0)))
             .expect("has_children was just checked true for this node")
             .clone();
     }
@@ -445,5 +508,84 @@ mod tests {
         assert!(node.raw_prompt.is_none());
         assert_eq!(node.prompt_tokens, Some(12));
         assert_eq!(node.content, "hi");
+    }
+}
+
+#[cfg(test)]
+mod branch_tests {
+    use super::*;
+
+    fn node(id: &str, parent: Option<&str>, created_at: i64, children: &[&str]) -> MessageNode {
+        MessageNode {
+            user_id: 1,
+            id: id.to_string(),
+            parent_id: parent.map(str::to_string),
+            role: "user".to_string(),
+            content: String::new(),
+            visible: true,
+            deleted: false,
+            created_at,
+            children: children.iter().map(|s| s.to_string()).collect(),
+            raw_prompt: None,
+            prompt_tokens: None,
+            context_limit: None,
+            character_id: None,
+        }
+    }
+
+    fn tree(nodes: Vec<MessageNode>) -> MessageTree {
+        let root_id = nodes.iter().find(|n| n.parent_id.is_none()).map(|n| n.id.clone());
+        MessageTree {
+            user_id: 1,
+            root_id,
+            messages: nodes.into_iter().map(|n| (n.id.clone(), n)).collect(),
+            character: None,
+            group: None,
+            user_name: None,
+        }
+    }
+
+    #[test]
+    fn a_newer_dead_end_sibling_does_not_hide_the_long_branch() {
+        let t = tree(vec![
+            node("root", None, 1, &["long", "stray"]),
+            node("long", Some("root"), 2, &["a1"]),
+            node("a1", Some("long"), 3, &["u2"]),
+            node("u2", Some("a1"), 4, &["a2"]),
+            node("a2", Some("u2"), 9, &[]),
+            node("stray", Some("root"), 6, &[]),
+        ]);
+        let ids: Vec<_> = active_branch(&t).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["root", "long", "a1", "u2", "a2"]);
+    }
+
+    #[test]
+    fn a_stray_line_stays_hidden_after_the_branch_tail_is_deleted() {
+        // the long branch lost its newest messages, so the unanswered
+        // line is now newer than everything left on it
+        let mut stray = node("stray", Some("root"), 8, &[]);
+        stray.role = "user".to_string();
+        let mut a1 = node("a1", Some("long"), 3, &[]);
+        a1.role = "assistant".to_string();
+        let t = tree(vec![
+            node("root", None, 1, &["long", "stray"]),
+            node("long", Some("root"), 2, &["a1"]),
+            a1,
+            stray,
+        ]);
+        let ids: Vec<_> = active_branch(&t).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["root", "long", "a1"]);
+    }
+
+    #[test]
+    fn a_newer_regeneration_still_wins() {
+        let t = tree(vec![
+            node("root", None, 1, &["u"]),
+            node("u", Some("root"), 2, &["old", "new"]),
+            node("old", Some("u"), 3, &[]),
+            node("new", Some("u"), 4, &[]),
+        ]);
+        let ids: Vec<_> = active_branch(&t).into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["root", "u", "new"]);
     }
 }
