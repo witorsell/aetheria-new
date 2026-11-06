@@ -50,12 +50,20 @@ impl ProviderNetworkPolicy {
         if private_literal && !allow_private {
             return Err(ApiError::forbidden("Private provider endpoints must be allowed by the instance administrator"));
         }
-        reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .pool_max_idle_per_host(4)
-            .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
-            .dns_resolver(ProviderResolver { allow_private })
+            .dns_resolver(ProviderResolver { allow_private });
+        // public providers keep going through the proxy from HTTPS_PROXY, as
+        // they did before this client existed. this host cannot reach some
+        // providers directly (the connection stalls), so dropping the proxy
+        // here broke streaming entirely. an allowlisted private provider is
+        // local, so it never goes through one.
+        if allow_private {
+            builder = builder.no_proxy();
+        }
+        builder
             .build()
             .map_err(|_| ApiError::internal("Failed to build provider client"))
     }
