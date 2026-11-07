@@ -211,6 +211,25 @@ fn render_element(name: &str, style: &str, children: Vec<AnyView>, href: Option<
     }
 }
 
+/// reads a markdown image (`![alt](url)`, optional `"title"` after the url) at
+/// the start of `src`. returns the url and how many bytes the whole thing
+/// takes up. text inside html elements doesn't go through the markdown
+/// parser, so without this the syntax would show up as literal text.
+fn parse_markdown_image(src: &str) -> Option<(String, usize)> {
+    let after_bang = src.strip_prefix("![")?;
+    let alt_end = after_bang.find(|c| c == ']' || c == '[' || c == '\n')?;
+    if !after_bang[alt_end..].starts_with("](") {
+        return None;
+    }
+    let inner_start = alt_end + 2;
+    let inner_len = after_bang[inner_start..].find(|c| c == ')' || c == '\n')?;
+    if !after_bang[inner_start + inner_len..].starts_with(')') {
+        return None;
+    }
+    let url = after_bang[inner_start..inner_start + inner_len].split_whitespace().next()?;
+    Some((sanitize_url(url)?, 2 + inner_start + inner_len + 1))
+}
+
 // text + allowed html elements until closing tag or end of input
 fn parse_children(src: &str, mut pos: usize, closing: &str, forbid_media: bool) -> (Vec<AnyView>, usize) {
     let mut out = Vec::new();
@@ -277,6 +296,17 @@ fn parse_children(src: &str, mut pos: usize, closing: &str, forbid_media: bool) 
             pos += 1;
             continue;
         }
+        if rest.starts_with("![") {
+            if let Some((url, consumed)) = parse_markdown_image(rest) {
+                if !text.is_empty() {
+                    out.push(view! { {decode_entities(&text)} }.into_any());
+                    text.clear();
+                }
+                out.push(render_element("img", "border-radius: 4px;", Vec::new(), None, Some(url), forbid_media));
+                pos += consumed;
+                continue;
+            }
+        }
         let ch = rest.chars().next().unwrap();
         text.push(ch);
         pos += ch.len_utf8();
@@ -293,7 +323,9 @@ pub enum TextOrHtml<'a> {
 }
 
 // pulled out as real elements even at top level, outside paragraphs
-const TOP_LEVEL_TAGS: &[&str] = &["div", "span", "font", "a", "img"];
+// `p` is here too: cmark reads a line starting with `<p ...>` as a raw html block
+// and the renderer drops those, so a centered `<p>![](url)</p>` lost its image
+const TOP_LEVEL_TAGS: &[&str] = &["div", "span", "font", "a", "img", "p"];
 
 // pulls top-level allowed html out as sanitized elements, rest is plain
 // markdown text
@@ -467,7 +499,44 @@ fn match_format_tag(lower: &str, start: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_style, sanitize_url, strip_plot_momentum, unwrap_format_tags};
+    use super::{find_next_top_level_tag, parse_markdown_image, sanitize_style, sanitize_url, strip_plot_momentum, unwrap_format_tags};
+
+    #[test]
+    fn reads_a_markdown_image_and_its_length() {
+        let text = "![](https://cdn.imgchest.com/files/e3cb50ef77c9.webp)</p>";
+        let (url, len) = parse_markdown_image(text).unwrap();
+        assert_eq!(url, "https://cdn.imgchest.com/files/e3cb50ef77c9.webp");
+        assert_eq!(&text[len..], "</p>");
+    }
+
+    #[test]
+    fn markdown_image_allows_alt_text_and_a_title() {
+        let (url, len) = parse_markdown_image("![a cat](https://x.test/c.png \"cat\") after").unwrap();
+        assert_eq!(url, "https://x.test/c.png");
+        assert_eq!(len, "![a cat](https://x.test/c.png \"cat\")".len());
+    }
+
+    #[test]
+    fn markdown_image_rejects_unsafe_or_broken_syntax() {
+        assert!(parse_markdown_image("![](javascript:alert(1))").is_none());
+        assert!(parse_markdown_image("![](data:image/png;base64,AAAA)").is_none());
+        assert!(parse_markdown_image("![](/relative.png)").is_none());
+        assert!(parse_markdown_image("![alt](https://x.test/c.png").is_none());
+        assert!(parse_markdown_image("![alt] (https://x.test/c.png)").is_none());
+        assert!(parse_markdown_image("not an image").is_none());
+    }
+
+    #[test]
+    fn a_centered_paragraph_is_pulled_out_as_html() {
+        let text = "<p style=\"text-align: center;\">![](https://cdn.imgchest.com/files/e3cb50ef77c9.webp)</p>";
+        let (start, name, _, _) = find_next_top_level_tag(text, 0).unwrap();
+        assert_eq!((start, name.as_str()), (0, "p"));
+    }
+
+    #[test]
+    fn pre_blocks_are_not_mistaken_for_paragraphs() {
+        assert!(find_next_top_level_tag("<pre>code</pre>", 0).is_none());
+    }
 
     #[test]
     fn sanitize_url_keeps_http_and_https() {
