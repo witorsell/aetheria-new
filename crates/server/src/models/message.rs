@@ -30,6 +30,7 @@ impl Message {
 pub struct MessageTree {
     pub user_id: i64,
     pub root_id: Option<String>,
+    #[serde(serialize_with = "crate::models::serialize_sorted")]
     pub messages: HashMap<String, MessageNode>,
     pub character: Option<crate::models::character::Character>,
     pub group: Option<crate::models::group::GroupWithMembers>,
@@ -508,6 +509,49 @@ mod tests {
         assert!(node.raw_prompt.is_none());
         assert_eq!(node.prompt_tokens, Some(12));
         assert_eq!(node.content, "hi");
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use super::*;
+
+    fn tree_of(count: usize) -> MessageTree {
+        let mut messages = HashMap::new();
+        for i in 0..count {
+            let id = format!("message-{i:03}");
+            messages.insert(
+                id.clone(),
+                MessageNode {
+                    user_id: 1,
+                    id,
+                    parent_id: if i == 0 { None } else { Some(format!("message-{:03}", i - 1)) },
+                    role: if i % 2 == 0 { "user" } else { "assistant" }.to_string(),
+                    content: format!("line {i}"),
+                    visible: true,
+                    deleted: false,
+                    created_at: i as i64,
+                    children: Vec::new(),
+                    raw_prompt: None,
+                    prompt_tokens: None,
+                    context_limit: None,
+                    character_id: None,
+                },
+            );
+        }
+        MessageTree { user_id: 1, root_id: Some("message-000".into()), messages, character: None, group: None, user_name: None }
+    }
+
+    /// the Cloudflare worker in front of the site fetches a long response as
+    /// separate byte-range requests and glues the pieces together. that only
+    /// works if every request for the same data returns the same bytes, and a
+    /// HashMap hands out its entries in a different order each time it is built
+    #[test]
+    fn the_same_chat_always_serializes_to_the_same_bytes() {
+        let first = serde_json::to_string(&tree_of(40)).unwrap();
+        for _ in 0..20 {
+            assert_eq!(serde_json::to_string(&tree_of(40)).unwrap(), first);
+        }
     }
 }
 

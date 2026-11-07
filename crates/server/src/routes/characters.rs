@@ -321,9 +321,10 @@ pub async fn delete_tag(
 pub async fn list_all_character_tags(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
-) -> Result<Json<std::collections::HashMap<String, Vec<String>>>, ApiError> {
+) -> Result<Json<std::collections::BTreeMap<String, Vec<String>>>, ApiError> {
     let pairs = crate::models::character::list_all_character_tags(&state.db.read_pool, user_id).await?;
-    let mut by_character: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    // sorted, so every request returns the same bytes
+    let mut by_character: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
     for (character_id, tag_id) in pairs {
         by_character.entry(character_id).or_default().push(tag_id);
     }

@@ -281,8 +281,7 @@ pub async fn tree_from_message(
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
     Query(params): Query<TreeFromParams>,
-) -> Result<Json<HashMap<String, crate::models::message::MessageNode>>, ApiError> {
-    use std::collections::HashMap;
+) -> Result<Json<std::collections::BTreeMap<String, crate::models::message::MessageNode>>, ApiError> {
     let nodes = crate::models::message::tree_from_message(
         &state.db.read_pool,
         user_id,
@@ -291,7 +290,8 @@ pub async fn tree_from_message(
         params.depth,
     )
     .await?;
-    Ok(Json(nodes))
+    // sorted, so every request for the same branch returns the same bytes
+    Ok(Json(nodes.into_iter().collect()))
 }
 
 #[derive(Deserialize)]

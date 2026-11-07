@@ -509,3 +509,47 @@ async fn live_events_carry_their_log_position_as_the_sse_id() {
     }
     assert!(!text.contains("id: 4"));
 }
+
+async fn body_of(app: &axum::Router, cookie: &str, uri: &str) -> Vec<u8> {
+    let response = app.clone().oneshot(Request::builder().uri(uri).header(header::COOKIE, cookie).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "{uri}");
+    axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap().to_vec()
+}
+
+/// the Cloudflare worker in front of the site fetches a long response as separate
+/// byte-range requests and glues the pieces together, so every request for the same
+/// data has to return the same bytes. a chat used to come out in a different message
+/// order each time, and the glued result lost messages or failed to parse
+#[tokio::test]
+async fn a_long_chat_comes_back_as_identical_bytes_every_time() {
+    let mock_base_url = spawn_mock_provider().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
+    let chat_id = setup_chat(&app, &cookie, &mock_base_url).await;
+
+    let mut parent: Option<String> = None;
+    for i in 0..4 {
+        let response = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/chats/{chat_id}/generate"))
+            .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie.as_str())
+            .body(Body::from(serde_json::json!({"content": format!("message {i}"), "parent_id": parent}).to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let tree: serde_json::Value = serde_json::from_slice(&body_of(&app, &cookie, &format!("/api/chats/{chat_id}/messages?brief=true")).await).unwrap();
+        parent = tree["messages"].as_object().unwrap().values()
+            .max_by_key(|m| m["created_at"].as_i64().unwrap()).map(|m| m["id"].as_str().unwrap().to_string());
+    }
+
+    let uri = format!("/api/chats/{chat_id}/messages?brief=true");
+    let first = body_of(&app, &cookie, &uri).await;
+    let tree: serde_json::Value = serde_json::from_slice(&first).unwrap();
+    assert_eq!(tree["messages"].as_object().unwrap().len(), 8);
+    for _ in 0..15 {
+        assert_eq!(body_of(&app, &cookie, &uri).await, first, "history bytes changed between requests");
+    }
+
+    let root = tree["root_id"].as_str().unwrap();
+    let subtree_uri = format!("/api/chats/{chat_id}/messages/tree?from={root}&depth=20");
+    let first = body_of(&app, &cookie, &subtree_uri).await;
+    for _ in 0..15 {
+        assert_eq!(body_of(&app, &cookie, &subtree_uri).await, first, "subtree bytes changed between requests");
+    }
+}
