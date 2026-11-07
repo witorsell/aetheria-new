@@ -195,13 +195,12 @@ fn render_element(name: &str, style: &str, children: Vec<AnyView>, href: Option<
             } else {
                 match src {
                     Some(src) => {
-                        let proxy_url = format!("/api/proxy?url={}", urlencoding::encode(&src));
                         // unlike markdown image syntax, a card's raw <img> tag
                         // rarely sets its own width constraint, so without a
                         // default it renders at native resolution and
                         // overflows the content column.
                         let img_style = format!("max-width: 100%; {style}");
-                        view! { <crate::components::proxied_image::ProxiedImage src=proxy_url style=img_style alt="image" /> }.into_any()
+                        view! { <crate::components::proxied_image::ProxiedImage src=src style=img_style alt="image" /> }.into_any()
                     }
                     None => view! {}.into_any(),
                 }

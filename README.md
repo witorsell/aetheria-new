@@ -36,6 +36,7 @@ So here we are.
 
 ## Recent updates
 Last 7 days only. Older entries get trimmed off.
+- Images in descriptions and chats load straight from their host instead of going through the server, so they show up faster (Nov 7)
 - Images inside a centered `<p>` show up again. A description like `<p style="text-align: center;">![](url)</p>` used to drop the whole line (Nov 7)
 - Big images in character descriptions load again. Anything over about 600KB used to come back as a 502, so they now download in slices (Nov 7)
 - Replies stream again. The provider client had stopped using the server's proxy, so requests to providers that can't be reached directly hung (Nov 6)

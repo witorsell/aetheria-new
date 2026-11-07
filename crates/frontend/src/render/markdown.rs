@@ -180,13 +180,12 @@ fn render_markdown_blocks(text: &str, blocks: &mut Vec<AnyView>, forbid_media: b
                     // drop the alt text that was added to inline
                     inline.truncate(start_len);
                 }
-                if let Some(url) = image_url.take() {
+                if let Some(url) = image_url.take().and_then(|u| crate::render::safe_html::sanitize_url(&u)) {
                     if !forbid_media {
                         let title = image_title.take().unwrap_or_default();
-                        let proxy_url = format!("/api/proxy?url={}", urlencoding::encode(&url));
                         let view = view! {
                             <crate::components::proxied_image::ProxiedImage
-                                src=proxy_url
+                                src=url
                                 title=title
                                 alt="image"
                                 style="max-width: 100%; border-radius: 4px; margin: 8px 0; display: block;"
