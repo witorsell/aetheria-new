@@ -5,7 +5,7 @@ fn is_allowed_tag(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "div" | "span" | "p" | "strong" | "b" | "em" | "i" | "u" | "small"
-            | "font" | "br" | "h1" | "h2" | "h3" | "a" | "img"
+            | "font" | "br" | "h1" | "h2" | "h3" | "a" | "img" | "mark"
     )
 }
 
@@ -179,6 +179,7 @@ fn render_element(name: &str, style: &str, children: Vec<AnyView>, href: Option<
         "em" | "i" => view! { <em style=style>{children}</em> }.into_any(),
         "u" => view! { <u style=style>{children}</u> }.into_any(),
         "small" => view! { <small style=style>{children}</small> }.into_any(),
+        "mark" => view! { <mark style=style>{children}</mark> }.into_any(),
         "h1" => view! { <h1 style=style>{children}</h1> }.into_any(),
         "h2" => view! { <h2 style=style>{children}</h2> }.into_any(),
         "h3" => view! { <h3 style=style>{children}</h3> }.into_any(),
@@ -498,7 +499,7 @@ fn match_format_tag(lower: &str, start: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_next_top_level_tag, parse_markdown_image, sanitize_style, sanitize_url, strip_plot_momentum, unwrap_format_tags};
+    use super::{find_next_top_level_tag, is_allowed_tag, parse_open_tag, resolve_style, parse_markdown_image, sanitize_style, sanitize_url, strip_plot_momentum, unwrap_format_tags};
 
     #[test]
     fn reads_a_markdown_image_and_its_length() {
@@ -530,6 +531,15 @@ mod tests {
         let text = "<p style=\"text-align: center;\">![](https://cdn.imgchest.com/files/e3cb50ef77c9.webp)</p>";
         let (start, name, _, _) = find_next_top_level_tag(text, 0).unwrap();
         assert_eq!((start, name.as_str()), (0, "p"));
+    }
+
+    #[test]
+    fn mark_tags_from_a_rich_text_editor_are_allowed() {
+        assert!(is_allowed_tag("mark"));
+        let tag = "<mark style=\"background-color: rgba(255, 255, 255, 0); color: inherit\">";
+        let (name, end, self_close) = parse_open_tag(tag).unwrap();
+        assert_eq!((name.as_str(), end, self_close), ("mark", tag.len(), false));
+        assert_eq!(resolve_style(tag), "background-color: rgba(255, 255, 255, 0); color: inherit");
     }
 
     #[test]
