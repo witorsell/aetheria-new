@@ -36,6 +36,7 @@ So here we are.
 
 ## Recent updates
 Last 7 days only. Older entries get trimmed off.
+- A chat that fails to load now says so and keeps trying instead of showing a blank screen, and one that only loaded as a single branch gets swapped for the full chat once it arrives. Chat lists and character info retry too (Nov 7)
 - Long chats no longer load with messages missing or not at all. The server sent a chat's messages in a different order on every request, and the Cloudflare worker glues long responses together from separate requests, so the pieces didn't match. The order is fixed now (Nov 7)
 - Replies no longer hang when the connection freezes mid-stream. If the live stream goes quiet for 3 seconds, the rest of the reply is fetched in small pieces on fresh connections, and the history reload after a reply retries on its own instead of waiting out a stalled connection (Nov 7)
 - Highlighted text from rich-text card descriptions shows properly. The `<mark>` tag used to print itself as literal text (Nov 7)

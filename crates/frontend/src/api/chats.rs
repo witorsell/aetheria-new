@@ -57,7 +57,7 @@ struct AddChatMemberRequest<'a> {
 
 pub async fn get_chat(id: &str) -> Result<Chat, String> {
     let url = format!("/api/chats/{id}");
-    super::hedged(|| get_chat_once(url.clone())).await
+    super::resilient(|| get_chat_once(url.clone())).await
 }
 
 async fn get_chat_once(url: String) -> Result<Chat, String> {
@@ -85,6 +85,10 @@ pub struct RecentChat {
 }
 
 pub async fn list_recent_chats() -> Result<Vec<RecentChat>, String> {
+    super::resilient(list_recent_chats_once).await
+}
+
+async fn list_recent_chats_once() -> Result<Vec<RecentChat>, String> {
     Request::get("/api/chats/recent?limit=8")
         .credentials(web_sys::RequestCredentials::Include)
         .send()
@@ -96,7 +100,12 @@ pub async fn list_recent_chats() -> Result<Vec<RecentChat>, String> {
 }
 
 pub async fn list_chats(character_id: &str) -> Result<Vec<Chat>, String> {
-    Request::get(&format!("/api/characters/{character_id}/chats"))
+    let url = format!("/api/characters/{character_id}/chats");
+    super::resilient(|| list_chats_once(url.clone())).await
+}
+
+async fn list_chats_once(url: String) -> Result<Vec<Chat>, String> {
+    Request::get(&url)
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await
@@ -151,7 +160,7 @@ pub async fn list_messages(chat_id: &str) -> Result<MessageTree, String> {
     // what made this reload take seconds, during which the just-finished
     // messages had already been taken off the screen.
     let url = format!("/api/chats/{chat_id}/messages?brief=true");
-    super::hedged(|| list_messages_once(url.clone())).await
+    super::resilient(|| list_messages_once(url.clone())).await
 }
 
 async fn list_messages_once(url: String) -> Result<MessageTree, String> {
@@ -167,7 +176,12 @@ async fn list_messages_once(url: String) -> Result<MessageTree, String> {
 }
 
 pub async fn active_branch(chat_id: &str) -> Result<Vec<MessageNode>, String> {
-    Request::get(&format!("/api/chats/{chat_id}/active_branch?brief=true"))
+    let url = format!("/api/chats/{chat_id}/active_branch?brief=true");
+    super::resilient(|| active_branch_once(url.clone())).await
+}
+
+async fn active_branch_once(url: String) -> Result<Vec<MessageNode>, String> {
+    Request::get(&url)
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await

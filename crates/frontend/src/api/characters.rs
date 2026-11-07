@@ -105,7 +105,12 @@ pub async fn create_character(input: CharacterInput<'_>) -> Result<Character, St
 }
 
 pub async fn get_character(id: &str) -> Result<Character, String> {
-    Request::get(&format!("/api/characters/{id}"))
+    let url = format!("/api/characters/{id}");
+    super::resilient(|| get_character_once(url.clone())).await
+}
+
+async fn get_character_once(url: String) -> Result<Character, String> {
+    Request::get(&url)
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await

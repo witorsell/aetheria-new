@@ -42,7 +42,12 @@ struct SetGroupMemberInput {
 }
 
 pub async fn get_group(id: &str) -> Result<GroupWithMembers, String> {
-    Request::get(&format!("/api/groups/{id}"))
+    let url = format!("/api/groups/{id}");
+    super::resilient(|| get_group_once(url.clone())).await
+}
+
+async fn get_group_once(url: String) -> Result<GroupWithMembers, String> {
+    Request::get(&url)
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await

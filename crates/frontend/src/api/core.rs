@@ -137,6 +137,30 @@ where
     }
 }
 
+/// a repeatable GET that tries again on failure instead of giving up on the
+/// first bad answer. each try is itself hedged. the path to the server drops
+/// a request now and then and a retry a moment later nearly always works. a
+/// logged-out session is not retried, since asking again won't change it
+pub async fn resilient<T, F, Fut>(make: F) -> Result<T, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    const TRIES: u32 = 4;
+    let mut last = String::new();
+    for attempt in 0..TRIES {
+        if attempt > 0 {
+            gloo_timers::future::TimeoutFuture::new(400 * attempt).await;
+        }
+        match hedged(&make).await {
+            Ok(value) => return Ok(value),
+            Err(e) if e == SESSION_EXPIRED_ERROR => return Err(e),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
 enum Raced<T> {
     Ready(T),
     Stalled,
