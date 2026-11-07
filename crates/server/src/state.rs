@@ -68,6 +68,10 @@ pub struct AppState {
     provider_clients: Cache<String, reqwest::Client>,
     pub proxy_client: reqwest::Client,
     pub proxy_fetch_slots: std::sync::Arc<tokio::sync::Semaphore>,
+    /// event logs of replies being generated, keyed by the id the client sent
+    /// with the request. lets a client whose live stream froze pick up from the
+    /// last event it saw. idle ones expire on their own.
+    pub live_generations: Cache<String, std::sync::Arc<crate::live_generation::LiveGeneration>>,
     /// failed login attempts per username. keyed lowercase so the
     /// lockout can't be dodged by varying case. TTL doubles as the lockout
     /// window: every failed attempt refreshes it, so a username under active
@@ -140,6 +144,10 @@ impl AppState {
             provider_clients: Cache::builder().max_capacity(128).build(),
             proxy_fetch_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(8)),
             proxy_client: crate::routes::proxy::build_proxy_client(),
+            live_generations: Cache::builder()
+                .max_capacity(2_000)
+                .time_to_idle(Duration::from_secs(10 * 60))
+                .build(),
             login_attempts: Cache::builder()
                 .max_capacity(10_000)
                 .time_to_live(Duration::from_secs(15 * 60))

@@ -19,6 +19,7 @@ pub struct GenerateInput {
 pub async fn generate(Extension(user_id): Extension<i64>, 
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
+    headers: axum::http::HeaderMap,
     axum::Json(input): axum::Json<GenerateInput>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
     if input.content.trim().is_empty() {
@@ -36,7 +37,46 @@ pub async fn generate(Extension(user_id): Extension<i64>,
             other => crate::error::ApiError::from_sqlx(other),
         })?;
 
-    run_generation(state, user_id, chat_id, Some(message.id)).await
+    run_generation(state, user_id, chat_id, Some(message.id), crate::live_generation::id_from_headers(&headers)).await
+}
+
+#[derive(Deserialize)]
+pub struct EventsQuery {
+    pub from: Option<usize>,
+    /// how long to hold the request open for a new event, in milliseconds.
+    /// kept short: the Cloudflare worker cuts a request off after 6s
+    pub wait: Option<u64>,
+}
+
+/// the reply's event log from `from` on, as a small answer on its own
+/// connection. this is what a client falls back to when its live stream
+/// goes quiet, see crate::live_generation. holds the request open for a
+/// moment when there is nothing new yet, so it reads like a stream.
+pub async fn generation_events(
+    Extension(user_id): Extension<i64>,
+    State(state): State<AppState>,
+    Path((chat_id, generation_id)): Path<(String, String)>,
+    Query(query): Query<EventsQuery>,
+) -> Result<impl axum::response::IntoResponse, crate::error::ApiError> {
+    let live = state
+        .live_generations
+        .get(&generation_id)
+        .await
+        .filter(|live| live.user_id == user_id && live.chat_id == chat_id)
+        .ok_or_else(|| crate::error::ApiError::not_found("No such generation"))?;
+    let from = query.from.unwrap_or(0);
+    let wait = std::time::Duration::from_millis(query.wait.unwrap_or(4_000).min(5_000));
+    let mut slice = live.read_waiting(from, wait).await;
+    if !slice.events.is_empty() && !slice.done {
+        // let a burst of tokens land together instead of answering each one.
+        // every poll is a fresh connection through Cloudflare, so fewer is better
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        slice = live.read(from);
+    }
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        axum::Json(serde_json::json!({ "events": slice.events, "next": slice.next, "done": slice.done })),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -48,6 +88,7 @@ pub struct RegenerateParams {
 pub async fn regenerate(Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<RegenerateParams>,
 ) -> Result<Sse<EventStream>, crate::error::ApiError> {
     state.check_generation_rate_limit(user_id).await?;
@@ -90,9 +131,10 @@ pub async fn regenerate(Extension(user_id): Extension<i64>,
             (history, last_message.content.clone())
         };
 
+        let live = crate::live_generation::start(&state, user_id, &chat_id, crate::live_generation::id_from_headers(&headers).as_deref()).await;
         let event_stream = crate::routes::generation_orchestrator::run_group_generation(
             state, user_id, chat_id, chat, history, trigger_text,
-            last_message.id.clone(), vec![character_id], characters_by_id, all_names,
+            last_message.id.clone(), vec![character_id], characters_by_id, all_names, live,
         );
         return Ok(Sse::new(event_stream.boxed()).keep_alive(KeepAlive::default()));
     }
@@ -100,12 +142,13 @@ pub async fn regenerate(Extension(user_id): Extension<i64>,
     // parent_id, when given, is the user message to branch a new reply from
     // (a swipe/reroll); without it, fall back to whatever the active branch
     // currently ends on (a fresh user message awaiting its first reply).
-    run_generation(state, user_id, chat_id, params.parent_id).await
+    run_generation(state, user_id, chat_id, params.parent_id, crate::live_generation::id_from_headers(&headers)).await
 }
 
 pub async fn continue_generation(Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
     state.check_generation_rate_limit(user_id).await?;
     let chat = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
@@ -152,7 +195,8 @@ pub async fn continue_generation(Extension(user_id): Extension<i64>,
     let state_for_memory = state.clone();
     let chat_id_for_memory = chat_id.clone();
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+    let live = crate::live_generation::start(&state, user_id, &chat_id, crate::live_generation::id_from_headers(&headers).as_deref()).await;
+    let (tx, rx) = crate::live_generation::GenSink::channel(live);
 
     // runs to completion in its own task regardless of whether the client is
     // still reading the SSE response, same fix as run_generation - otherwise
@@ -161,19 +205,14 @@ pub async fn continue_generation(Extension(user_id): Extension<i64>,
         let mut provider_stream = provider_stream;
         let mut accumulated = String::new();
         while let Some(item) = provider_stream.next().await {
-            let event = match item {
+            match item {
                 Ok(delta) => {
                     accumulated.push_str(&delta);
-                    Ok(Event::default().data(delta))
+                    tx.data(delta);
                 }
-                Err(ProviderError::Request(e)) => {
-                    Ok(Event::default().event("error").data(e.to_string()))
-                }
-                Err(ProviderError::Status(code, body)) => {
-                    Ok(Event::default().event("error").data(format!("{code}: {body}")))
-                }
-            };
-            let _ = tx.send(event).await;
+                Err(ProviderError::Request(e)) => tx.error(e.to_string()),
+                Err(ProviderError::Status(code, body)) => tx.error(format!("{code}: {body}")),
+            }
         }
 
         if !accumulated.is_empty() {
@@ -189,12 +228,12 @@ pub async fn continue_generation(Extension(user_id): Extension<i64>,
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "failed to continue message");
-                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
+                    tx.error(format!("failed to save message: {}", e));
                     return;
                 }
             }
         }
-        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+        tx.done();
     });
 
     let event_stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
@@ -215,6 +254,7 @@ pub async fn respond_as_user(
     Extension(user_id): Extension<i64>,
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<RespondAsUserParams>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, crate::error::ApiError> {
     state.check_generation_rate_limit(user_id).await?;
@@ -254,7 +294,8 @@ pub async fn respond_as_user(
     let state_for_memory = state.clone();
     let chat_id_for_memory = chat_id.clone();
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+    let live = crate::live_generation::start(&state, user_id, &chat_id, crate::live_generation::id_from_headers(&headers).as_deref()).await;
+    let (tx, rx) = crate::live_generation::GenSink::channel(live);
 
     // runs to completion in its own task regardless of whether the client is
     // still reading the SSE response, same fix as run_generation - otherwise
@@ -263,21 +304,14 @@ pub async fn respond_as_user(
         let mut provider_stream = provider_stream;
         let mut accumulated = String::new();
         while let Some(item) = provider_stream.next().await {
-            let event = match item {
+            match item {
                 Ok(delta) => {
                     accumulated.push_str(&delta);
-                    Ok(Event::default().data(delta))
+                    tx.data(delta);
                 }
-                Err(ProviderError::Request(e)) => {
-                    Ok(Event::default().event("error").data(e.to_string()))
-                }
-                Err(ProviderError::Status(code, body)) => {
-                    Ok(Event::default()
-                        .event("error")
-                        .data(format!("{code}: {body}")))
-                }
-            };
-            let _ = tx.send(event).await;
+                Err(ProviderError::Request(e)) => tx.error(e.to_string()),
+                Err(ProviderError::Status(code, body)) => tx.error(format!("{code}: {body}")),
+            }
         }
 
         if !accumulated.is_empty() {
@@ -299,12 +333,12 @@ pub async fn respond_as_user(
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "failed to save user message");
-                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
+                    tx.error(format!("failed to save message: {}", e));
                     return;
                 }
             }
         }
-        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+        tx.done();
     });
 
     let event_stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });

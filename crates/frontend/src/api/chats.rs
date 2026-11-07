@@ -56,7 +56,12 @@ struct AddChatMemberRequest<'a> {
 }
 
 pub async fn get_chat(id: &str) -> Result<Chat, String> {
-    Request::get(&format!("/api/chats/{id}"))
+    let url = format!("/api/chats/{id}");
+    super::hedged(|| get_chat_once(url.clone())).await
+}
+
+async fn get_chat_once(url: String) -> Result<Chat, String> {
+    Request::get(&url)
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await
@@ -145,7 +150,12 @@ pub async fn list_messages(chat_id: &str) -> Result<MessageTree, String> {
     // brief leaves out each reply's stored provider payload. that payload is
     // what made this reload take seconds, during which the just-finished
     // messages had already been taken off the screen.
-    let response = Request::get(&format!("/api/chats/{chat_id}/messages?brief=true"))
+    let url = format!("/api/chats/{chat_id}/messages?brief=true");
+    super::hedged(|| list_messages_once(url.clone())).await
+}
+
+async fn list_messages_once(url: String) -> Result<MessageTree, String> {
+    let response = Request::get(&url)
         .credentials(web_sys::RequestCredentials::Include)
         .send()
         .await

@@ -4,6 +4,7 @@ pub mod db;
 pub mod error;
 pub mod embedding;
 pub mod group_activation;
+pub mod live_generation;
 #[cfg(feature = "local-embeddings")]
 pub mod local_embedding;
 pub mod memory;

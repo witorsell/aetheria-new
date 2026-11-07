@@ -110,6 +110,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/chats/{id}/members", post(chats::add_member))
         .route("/api/chats/{id}/members/{character_id}", delete(chats::remove_member))
         .route("/api/chats/{id}/generate", post(generate::generate))
+        .route("/api/chats/{id}/generation/{generation_id}/events", get(generate::generation_events))
         .route("/api/chats/{id}/regenerate", post(generate::regenerate))
         .route("/api/chats/{id}/continue", post(generate::continue_generation))
         .route("/api/chats/{id}/respond-as-user", post(generate::respond_as_user))

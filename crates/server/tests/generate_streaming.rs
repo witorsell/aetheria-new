@@ -355,3 +355,157 @@ async fn regenerate_branches_from_the_given_parent_instead_of_the_last_reply() {
          what actually catches that"
     );
 }
+
+
+/// settings pointed at the mock provider, one character and one chat. returns the chat id.
+async fn setup_chat(app: &axum::Router, cookie: &str, mock_base_url: &str) -> String {
+    let settings_body = serde_json::json!({
+        "api_base_url": mock_base_url, "api_key": "test-key", "model_name": "test-model",
+        "system_prompt": "", "context_limit": 8192, "post_history_instructions": "",
+        "forbid_external_media": false, "provider_type": "openai"
+    })
+    .to_string();
+    app.clone().oneshot(Request::builder().method("PUT").uri("/api/settings")
+        .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie)
+        .body(Body::from(settings_body)).unwrap()).await.unwrap();
+    let character = app.clone().oneshot(Request::builder().method("POST").uri("/api/characters")
+        .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie)
+        .body(Body::from(serde_json::json!({"name": "Seraphina", "description": "", "personality": "", "scenario": "", "first_message": ""}).to_string()))
+        .unwrap()).await.unwrap();
+    let bytes = axum::body::to_bytes(character.into_body(), usize::MAX).await.unwrap();
+    let character_id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"].as_str().unwrap().to_string();
+    let chat = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/characters/{character_id}/chats"))
+        .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie)
+        .body(Body::from(serde_json::json!({"title": "Chat"}).to_string())).unwrap()).await.unwrap();
+    let bytes = axum::body::to_bytes(chat.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"].as_str().unwrap().to_string()
+}
+
+async fn poll_events(app: &axum::Router, cookie: &str, chat_id: &str, generation_id: &str, from: usize) -> (StatusCode, serde_json::Value) {
+    let response = app.clone().oneshot(Request::builder()
+        .uri(format!("/api/chats/{chat_id}/generation/{generation_id}/events?from={from}&wait=3000"))
+        .header(header::COOKIE, cookie).body(Body::empty()).unwrap()).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+#[tokio::test]
+async fn a_client_that_never_reads_the_stream_can_replay_the_reply_from_the_event_log() {
+    let mock_base_url = spawn_mock_provider().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
+    let chat_id = setup_chat(&app, &cookie, &mock_base_url).await;
+
+    let response = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/chats/{chat_id}/generate"))
+        .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie.as_str())
+        .header("x-generation-id", "replay-test-0001")
+        .body(Body::from(serde_json::json!({"content": "Hi!"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    // the live connection froze for this client: it never reads a byte of it
+    drop(response);
+
+    let mut text = String::new();
+    let mut from = 0;
+    let mut saw_done = false;
+    for _ in 0..20 {
+        let (status, body) = poll_events(&app, &cookie, &chat_id, "replay-test-0001", from).await;
+        assert_eq!(status, StatusCode::OK);
+        for event in body["events"].as_array().unwrap() {
+            match event["k"].as_str().unwrap() {
+                "data" => text.push_str(event["d"].as_str().unwrap()),
+                "done" => saw_done = true,
+                other => panic!("unexpected event kind {other}"),
+            }
+        }
+        from = body["next"].as_u64().unwrap() as usize;
+        if body["done"].as_bool().unwrap() {
+            break;
+        }
+    }
+    assert_eq!(text, "Hello, world!");
+    assert!(saw_done, "the log should end with the done event");
+
+    // the reply was saved by the generation task even though nobody read the stream
+    let messages = app.clone().oneshot(Request::builder().uri(format!("/api/chats/{chat_id}/messages"))
+        .header(header::COOKIE, cookie.as_str()).body(Body::empty()).unwrap()).await.unwrap();
+    let bytes = axum::body::to_bytes(messages.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&bytes).contains("Hello, world!"));
+}
+
+#[tokio::test]
+async fn the_event_log_can_be_read_again_from_any_index() {
+    let mock_base_url = spawn_mock_provider().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
+    let chat_id = setup_chat(&app, &cookie, &mock_base_url).await;
+    let response = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/chats/{chat_id}/generate"))
+        .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie.as_str())
+        .header("x-generation-id", "index-test-0001")
+        .body(Body::from(serde_json::json!({"content": "Hi!"}).to_string())).unwrap()).await.unwrap();
+    drop(response);
+
+    let (_, all) = poll_events(&app, &cookie, &chat_id, "index-test-0001", 0).await;
+    let mut total = all["events"].as_array().unwrap().len();
+    let mut next = all["next"].as_u64().unwrap() as usize;
+    while !all["done"].as_bool().unwrap() && next < 5 {
+        let (_, more) = poll_events(&app, &cookie, &chat_id, "index-test-0001", next).await;
+        total += more["events"].as_array().unwrap().len();
+        next = more["next"].as_u64().unwrap() as usize;
+        if more["done"].as_bool().unwrap() { break; }
+    }
+    // three text events plus done
+    assert_eq!(total, 4);
+    let (_, tail) = poll_events(&app, &cookie, &chat_id, "index-test-0001", 2).await;
+    let kinds: Vec<_> = tail["events"].as_array().unwrap().iter().map(|e| e["k"].as_str().unwrap().to_string()).collect();
+    assert_eq!(kinds, ["data", "done"]);
+    assert_eq!(tail["done"], true);
+}
+
+#[tokio::test]
+async fn the_event_log_belongs_to_the_user_and_chat_that_started_it() {
+    let mock_base_url = spawn_mock_provider().await;
+    let (app, owner, other) = common::authed_app_with_second_user_and_providers(&[mock_base_url.as_str()]).await;
+    let chat_id = setup_chat(&app, &owner, &mock_base_url).await;
+    let response = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/chats/{chat_id}/generate"))
+        .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, owner.as_str())
+        .header("x-generation-id", "owner-test-0001")
+        .body(Body::from(serde_json::json!({"content": "Hi!"}).to_string())).unwrap()).await.unwrap();
+    drop(response);
+
+    assert_eq!(poll_events(&app, &owner, &chat_id, "owner-test-0001", 0).await.0, StatusCode::OK);
+    assert_eq!(poll_events(&app, &other, &chat_id, "owner-test-0001", 0).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(poll_events(&app, &owner, "some-other-chat", "owner-test-0001", 0).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(poll_events(&app, &owner, &chat_id, "never-registered-1", 0).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_request_without_a_usable_generation_id_still_streams_as_before() {
+    let mock_base_url = spawn_mock_provider().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
+    let chat_id = setup_chat(&app, &cookie, &mock_base_url).await;
+    for id in [None, Some("x"), Some("has spaces in it")] {
+        let mut request = Request::builder().method("POST").uri(format!("/api/chats/{chat_id}/generate"))
+            .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie.as_str());
+        if let Some(id) = id { request = request.header("x-generation-id", id); }
+        let response = app.clone().oneshot(request.body(Body::from(serde_json::json!({"content": "Hi!"}).to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("event: done"));
+    }
+}
+
+#[tokio::test]
+async fn live_events_carry_their_log_position_as_the_sse_id() {
+    let mock_base_url = spawn_mock_provider().await;
+    let (app, cookie) = common::authed_app_for_provider(&mock_base_url).await;
+    let chat_id = setup_chat(&app, &cookie, &mock_base_url).await;
+    let response = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/chats/{chat_id}/generate"))
+        .header(header::CONTENT_TYPE, "application/json").header(header::COOKIE, cookie.as_str())
+        .header("x-generation-id", "sse-id-test-0001")
+        .body(Body::from(serde_json::json!({"content": "Hi!"}).to_string())).unwrap()).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8_lossy(&bytes);
+    for position in 0..4 {
+        assert!(text.contains(&format!("id: {position}")), "missing id {position} in {text:?}");
+    }
+    assert!(!text.contains("id: 4"));
+}

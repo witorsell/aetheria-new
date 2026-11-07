@@ -9,6 +9,7 @@ mod personas;
 mod presets;
 mod regex_scripts;
 mod settings;
+mod stream_resume;
 mod themes;
 
 pub use account::*;

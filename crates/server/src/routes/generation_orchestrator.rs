@@ -1,5 +1,6 @@
 use crate::provider::prompt::{build_messages, estimate_message_tokens, ChatMessage, PromptContext, Role};
 use crate::provider::ProviderError;
+use crate::live_generation::GenSink;
 use crate::state::AppState;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -264,8 +265,9 @@ pub(crate) fn run_group_generation(
     activated_ids: Vec<String>,
     characters_by_id: HashMap<String, crate::models::character::Character>,
     all_names: HashMap<String, String>,
+    live: Option<std::sync::Arc<crate::live_generation::LiveGeneration>>,
 ) -> impl futures_util::Stream<Item = Result<Event, Infallible>> {
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+    let (tx, rx) = GenSink::channel(live);
 
     tokio::spawn(async move {
         for character_id in activated_ids {
@@ -276,9 +278,7 @@ pub(crate) fn run_group_generation(
                 .collect();
             let nudge = format!("[Write the next reply only as {}.]", character.name);
 
-            let _ = tx.send(Ok(Event::default().event("member").data(
-                serde_json::json!({ "character_id": character_id, "name": character.name }).to_string()
-            ))).await;
+            tx.member(serde_json::json!({ "character_id": character_id, "name": character.name }).to_string());
 
             let prepared = match assemble_generation(
                 &state, user_id, &chat, character, &history, &new_user_message, false, false,
@@ -286,7 +286,7 @@ pub(crate) fn run_group_generation(
             ).await {
                 Ok(p) => p,
                 Err(status) => {
-                    let _ = tx.send(Ok(Event::default().event("error").data(format!("prompt assembly failed: {}", status.code)))).await;
+                    tx.error(format!("prompt assembly failed: {}", status.code));
                     continue;
                 }
             };
@@ -301,10 +301,10 @@ pub(crate) fn run_group_generation(
                 match item {
                     Ok(delta) => {
                         accumulated.push_str(&delta);
-                        let _ = tx.send(Ok(Event::default().data(delta))).await;
+                        tx.data(delta);
                     }
-                    Err(ProviderError::Request(e)) => { let _ = tx.send(Ok(Event::default().event("error").data(e.to_string()))).await; }
-                    Err(ProviderError::Status(code, body)) => { let _ = tx.send(Ok(Event::default().event("error").data(format!("{code}: {body}")))).await; }
+                    Err(ProviderError::Request(e)) => { tx.error(e.to_string()); }
+                    Err(ProviderError::Status(code, body)) => { tx.error(format!("{code}: {body}")); }
                 }
             }
             if accumulated.is_empty() {
@@ -331,7 +331,7 @@ pub(crate) fn run_group_generation(
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "failed to save assistant message for {}", character_id);
-                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
+                    tx.error(format!("failed to save message: {}", e));
                 }
             }
         }
@@ -343,7 +343,7 @@ pub(crate) fn run_group_generation(
             crate::vector_memory::maybe_index_chat(&state_for_memory, user_id, &chat_id_for_memory).await;
         });
 
-        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+        tx.done();
     });
 
     futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) })
@@ -353,6 +353,7 @@ pub(crate) async fn run_generation(
     state: AppState, user_id: i64,
     chat_id: String,
     branch_point: Option<String>,
+    generation_id: Option<String>,
 ) -> Result<Sse<EventStream>, crate::error::ApiError> {
     let chat = crate::models::chat::get(&state.db.read_pool, user_id, &chat_id)
         .await?
@@ -393,9 +394,10 @@ pub(crate) async fn run_generation(
         let mut history_with_trigger = history;
         history_with_trigger.push(last_message.clone());
 
+        let live = crate::live_generation::start(&state, user_id, &chat_id, generation_id.as_deref()).await;
         let event_stream = run_group_generation(
             state, user_id, chat_id, chat, history_with_trigger, String::new(),
-            last_message.id.clone(), activated_ids, characters_by_id, all_names,
+            last_message.id.clone(), activated_ids, characters_by_id, all_names, live,
         );
         return Ok(Sse::new(event_stream.boxed()).keep_alive(KeepAlive::default()));
     }
@@ -420,7 +422,8 @@ pub(crate) async fn run_generation(
     let context_limit = prepared.context_limit;
     let parent_id_for_reply = last_message.id.clone();
 
-    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
+    let live = crate::live_generation::start(&state, user_id, &chat_id, generation_id.as_deref()).await;
+    let (tx, rx) = GenSink::channel(live);
 
     let chat_id_for_finish = chat_id.clone();
     let state_for_memory = state.clone();
@@ -432,19 +435,14 @@ pub(crate) async fn run_generation(
         let mut provider_stream = provider_stream;
         let mut accumulated = String::new();
         while let Some(item) = provider_stream.next().await {
-            let event = match item {
+            match item {
                 Ok(delta) => {
                     accumulated.push_str(&delta);
-                    Ok(Event::default().data(delta))
+                    tx.data(delta);
                 }
-                Err(ProviderError::Request(e)) => {
-                    Ok(Event::default().event("error").data(e.to_string()))
-                }
-                Err(ProviderError::Status(code, body)) => {
-                    Ok(Event::default().event("error").data(format!("{code}: {body}")))
-                }
-            };
-            let _ = tx.send(event).await;
+                Err(ProviderError::Request(e)) => tx.error(e.to_string()),
+                Err(ProviderError::Status(code, body)) => tx.error(format!("{code}: {body}")),
+            }
         }
 
         if !accumulated.is_empty() {
@@ -467,12 +465,12 @@ pub(crate) async fn run_generation(
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "failed to save assistant message");
-                    let _ = tx.send(Ok(Event::default().event("error").data(format!("failed to save message: {}", e)))).await;
+                    tx.error(format!("failed to save message: {}", e));
                     return;
                 }
             }
         }
-        let _ = tx.send(Ok(Event::default().event("done").data(""))).await;
+        tx.done();
     });
 
     let event_stream = futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) });
