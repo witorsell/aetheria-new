@@ -132,3 +132,12 @@ async fn edits_and_continuations_reject_stale_embedding_results() {
     db.writer.insert_memory_chunk(1, chat.id.clone(), message.id.clone(), "assistant".into(), "new".into(), "new".into(), vec![0;4]).await.unwrap();
     assert!(server::models::memory_chunk::list_for_chat(&db.read_pool, 1, &chat.id).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn proxy_slices_need_a_length_above_zero() {
+    let (app, cookie) = common::authed_app().await;
+    let response = app.oneshot(Request::builder()
+        .uri("/api/proxy?url=https%3A%2F%2Fexample.com%2Fa.png&off=0&len=0")
+        .header(header::COOKIE, cookie.as_str()).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

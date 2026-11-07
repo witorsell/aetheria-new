@@ -16,6 +16,44 @@ use std::net::ToSocketAddrs;
 #[derive(Deserialize)]
 pub struct ProxyQuery {
     url: String,
+    // optional slice of the media, so a client behind the size-limited path
+    // can pull a big image in pieces that each fit
+    off: Option<usize>,
+    len: Option<usize>,
+}
+
+// the biggest slice one request may ask for. the worker in front of the site
+// can only reassemble about 600KB per response, so stay well under that.
+const MAX_SLICE_BYTES: usize = 512 * 1024;
+
+/// builds the response for a cached or freshly fetched media body. with a
+/// slice it answers a small complete 200 holding just those bytes, plus the
+/// full size in `X-File-Size` so the caller knows how many slices exist.
+fn media_response(content_type: &str, bytes: bytes::Bytes, slice: Option<(usize, usize)>) -> axum::response::Response {
+    let content_type = HeaderValue::from_str(content_type)
+        .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
+    let cache_control = HeaderValue::from_static("public, max-age=3600, immutable");
+    let Some((off, len)) = slice else {
+        return (
+            [(axum::http::header::CONTENT_TYPE, content_type), (axum::http::header::CACHE_CONTROL, cache_control)],
+            bytes,
+        )
+            .into_response();
+    };
+    let total = bytes.len();
+    if off >= total {
+        return (StatusCode::RANGE_NOT_SATISFIABLE, "Slice starts past the end of the media").into_response();
+    }
+    let end = off.saturating_add(len.min(MAX_SLICE_BYTES)).min(total);
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (axum::http::header::CACHE_CONTROL, cache_control),
+            (axum::http::HeaderName::from_static("x-file-size"), HeaderValue::from(total)),
+        ],
+        bytes.slice(off..end),
+    )
+        .into_response()
 }
 
 pub const PROXY_USER_AGENT: &str =
@@ -196,15 +234,14 @@ pub async fn proxy_image(Extension(_user_id): Extension<i64>,
     // cache check before ever touching the network: a cache hit should be a
     // pure in-memory lookup, not pay for a DNS round-trip or connection it
     // doesn't need.
+    let slice = match (query.off, query.len) {
+        (_, Some(0)) => return (StatusCode::BAD_REQUEST, "Slice length must be above zero").into_response(),
+        (off, Some(len)) => Some((off.unwrap_or(0), len)),
+        (_, None) => None,
+    };
+
     if let Some(cached) = state.image_cache.get(&query.url).await {
-        return (
-            [
-                (axum::http::header::CONTENT_TYPE, HeaderValue::from_str(&cached.content_type).unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"))),
-                (axum::http::header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600, immutable")),
-            ],
-            cached.bytes,
-        )
-            .into_response();
+        return media_response(&cached.content_type, cached.bytes, slice);
     }
 
     let _permit = match state.proxy_fetch_slots.try_acquire() {
@@ -251,14 +288,7 @@ pub async fn proxy_image(Extension(_user_id): Extension<i64>,
         })
         .await;
 
-    (
-        [
-            (axum::http::header::CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"))),
-            (axum::http::header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600, immutable")),
-        ],
-        bytes,
-    )
-        .into_response()
+    media_response(&content_type, bytes, slice)
 }
 
 pub const MAX_MEDIA_BYTES: usize = 20 * 1024 * 1024;
@@ -376,6 +406,54 @@ mod tests {
         ] {
             assert!(!url_has_media_extension(url), "{url} should not be recognized as media by extension");
         }
+    }
+}
+
+#[cfg(test)]
+mod slice_tests {
+    use super::*;
+
+    async fn body_of(response: axum::response::Response) -> bytes::Bytes {
+        axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_slice_returns_just_those_bytes_and_the_full_size() {
+        let data: bytes::Bytes = (0..=255u8).cycle().take(1000).collect::<Vec<_>>().into();
+        let response = media_response("image/webp", data.clone(), Some((100, 300)));
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["x-file-size"], "1000");
+        assert_eq!(body_of(response).await, data.slice(100..400));
+    }
+
+    #[tokio::test]
+    async fn the_last_slice_stops_at_the_end_of_the_media() {
+        let data = bytes::Bytes::from(vec![7u8; 1000]);
+        let response = media_response("image/webp", data, Some((900, 300)));
+        assert_eq!(response.headers()["x-file-size"], "1000");
+        assert_eq!(body_of(response).await.len(), 100);
+    }
+
+    #[tokio::test]
+    async fn a_slice_never_exceeds_the_cap() {
+        let data = bytes::Bytes::from(vec![1u8; MAX_SLICE_BYTES * 2]);
+        let response = media_response("image/webp", data, Some((0, usize::MAX)));
+        assert_eq!(body_of(response).await.len(), MAX_SLICE_BYTES);
+    }
+
+    #[tokio::test]
+    async fn a_slice_past_the_end_is_refused() {
+        let data = bytes::Bytes::from(vec![1u8; 10]);
+        let response = media_response("image/webp", data, Some((10, 5)));
+        assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    }
+
+    #[tokio::test]
+    async fn no_slice_returns_the_whole_body_without_a_size_header() {
+        let data = bytes::Bytes::from(vec![3u8; 50]);
+        let response = media_response("image/webp", data, None);
+        assert!(response.headers().get("x-file-size").is_none());
+        assert_eq!(body_of(response).await.len(), 50);
     }
 }
 

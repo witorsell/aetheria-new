@@ -132,12 +132,16 @@
 // file, so each slice is its own short URL: /media-piece/<file>/<start>/<len>
 (() => {
   // 24KB is the biggest complete body this origin-to-CF path still delivers; 32KB dies at ~16KB
-  const PIECE = 24 * 1024;
+  const UPLOAD_PIECE = 24 * 1024;
   const ATTEMPTS = 3;
   const PIECE_TIMEOUT_MS = 8000;
   const CACHE_NAME = "aetheria-uploads";
   const MAX_INFLIGHT = 10;
   const IMAGE_SLOTS = 3;
+  // proxied images go through the worker, which can rebuild about 600KB per response,
+  // so a big one is pulled as slices that each fit inside that
+  const PROXY_PIECE = 256 * 1024;
+  const PROXY_PIECE_TIMEOUT_MS = 25000;
   const realFetch = window.__aetheriaRealFetch || window.fetch.bind(window);
   const blobs = new Map();
   const inflight = new Map();
@@ -176,7 +180,10 @@
     });
   }
 
+  const isProxy = (url) => url.startsWith("/api/proxy?");
+
   function pieceUrl(url, start, len) {
+    if (isProxy(url)) return `${url}&off=${start}&len=${len}`;
     const u = new URL(url, location.href);
     const name = u.pathname.split("/").pop();
     return `/media-piece/${encodeURIComponent(name)}/${start}/${len}`;
@@ -188,7 +195,7 @@
       try {
         const res = await limit(() => {
           const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), PIECE_TIMEOUT_MS);
+          const timer = setTimeout(() => ctrl.abort(), isProxy(url) ? PROXY_PIECE_TIMEOUT_MS : PIECE_TIMEOUT_MS);
           return realFetch(pieceUrl(url, start, len), {
             cache: "no-store",
             credentials: "same-origin",
@@ -210,6 +217,7 @@
   }
 
   async function download(url) {
+    const PIECE = isProxy(url) ? PROXY_PIECE : UPLOAD_PIECE;
     return withImageSlot(async () => {
       const first = await fetchPiece(url, 0, PIECE);
       const total = first.total;
@@ -267,10 +275,27 @@
     }
   }
 
+  // only /api/proxy images that already failed to load come through here; the ones
+  // that load on their own are left alone
+  function proxySrc(raw) {
+    if (!raw || raw.startsWith("blob:") || raw.startsWith("data:")) return null;
+    try {
+      const u = new URL(raw, location.href);
+      if (u.origin !== location.origin || u.pathname !== "/api/proxy") return null;
+      const params = new URLSearchParams(u.search);
+      for (const key of ["retry", "off", "len"]) params.delete(key);
+      return u.pathname + "?" + params.toString();
+    } catch {
+      return null;
+    }
+  }
+
   function upgrade(img) {
-    const attr = img.getAttribute("src") || img.src;
-    const url = uploadSrc(attr);
-    if (!url) return;
+    const url = uploadSrc(img.getAttribute("src") || img.src);
+    if (url) loadInto(img, url);
+  }
+
+  function loadInto(img, url) {
     if (img.dataset.rangedSrc === url && blobs.has(url)) {
       if (img.src !== blobs.get(url)) img.src = blobs.get(url);
       return;
@@ -306,6 +331,17 @@
       else m.addedNodes.forEach(scan);
     }
   });
+  // image errors don't bubble, so listen in the capture phase
+  addEventListener(
+    "error",
+    (e) => {
+      const img = e.target;
+      if (!img || img.nodeName !== "IMG") return;
+      const url = proxySrc(img.getAttribute("src") || img.src);
+      if (url) loadInto(img, url);
+    },
+    true,
+  );
   const start = () => {
     obs.observe(document.documentElement, {
       childList: true,
